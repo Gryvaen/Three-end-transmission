@@ -1,3 +1,8 @@
+/**
+ * LanRoom 前端：WebSocket 群聊、文件上传、连接信息（二维码）。
+ * 协议约定见 README —— presence 广播在线列表，message 广播聊天内容。
+ */
+
 const STORAGE_KEY = "lanroom-device-name";
 
 const platformIcons = {
@@ -9,6 +14,7 @@ const platformIcons = {
   unknown: "💻",
 };
 
+// DOM 引用集中管理，避免重复 querySelector
 const els = {
   joinScreen: document.getElementById("join-screen"),
   chatScreen: document.getElementById("chat-screen"),
@@ -33,10 +39,13 @@ const els = {
 };
 
 let ws = null;
-let selfDevice = null;
+let selfDevice = null; // 服务端分配的 device.id，用于区分自己发的消息
 let reconnectTimer = null;
-let preferredURL = null;
+let preferredURL = null; // 二维码使用的加入地址
 
+// --- 工具函数 ---
+
+/** 从 User-Agent 推断平台，连接 WebSocket 时传给服务端 */
 function detectPlatform() {
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes("android")) return "android";
@@ -77,6 +86,7 @@ function setConnected(online) {
   els.connStatus.classList.toggle("offline", !online);
 }
 
+/** 渲染左侧在线设备列表（由 presence 消息驱动） */
 function renderDevices(users) {
   els.deviceList.innerHTML = "";
   els.onlineCount.textContent = String(users.length);
@@ -95,6 +105,7 @@ function renderDevices(users) {
   });
 }
 
+/** 防止聊天内容 XSS（用户昵称、文字消息） */
 function escapeHTML(str) {
   return String(str)
     .replaceAll("&", "&amp;")
@@ -103,6 +114,10 @@ function escapeHTML(str) {
     .replaceAll('"', "&quot;");
 }
 
+/**
+ * 将服务端广播的消息渲染到聊天区。
+ * payload.kind: text | image | file
+ */
 function appendMessage(msg, isSelf) {
   const wrapper = document.createElement("div");
   wrapper.className = `msg${isSelf ? " self" : ""}`;
@@ -116,6 +131,7 @@ function appendMessage(msg, isSelf) {
   if (payload.kind === "text") {
     body = `<div class="msg-bubble">${escapeHTML(payload.content || "")}</div>`;
   } else if (payload.kind === "image") {
+    // 图片先经 /api/upload 存盘，聊天里只传 fileId
     const src = payload.fileId ? `/api/files/${payload.fileId}` : payload.content;
     body = `<img class="msg-image" src="${src}" alt="图片" />`;
   } else if (payload.kind === "file") {
@@ -145,6 +161,9 @@ function appendMessage(msg, isSelf) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
+// --- WebSocket ---
+
+/** 建立 WebSocket；断线后在聊天页内自动重连 */
 function connect(name) {
   if (ws) {
     ws.close();
@@ -165,6 +184,7 @@ function connect(name) {
 
   ws.onclose = () => {
     setConnected(false);
+    // 已离开聊天页则不再重连
     if (els.chatScreen.classList.contains("hidden")) return;
     reconnectTimer = setTimeout(() => connect(name), 2000);
   };
@@ -193,6 +213,7 @@ function connect(name) {
   };
 }
 
+/** 向服务端发送聊天消息（服务端会广播给所有在线客户端） */
 function sendWS(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "message", payload }));
@@ -205,6 +226,10 @@ async function sendText() {
   els.messageInput.value = "";
 }
 
+/**
+ * 文件/图片发送流程：先 HTTP 上传到 Hub，再通过 WebSocket 广播 fileId。
+ * 其他设备收到消息后，从 /api/files/{id} 下载。
+ */
 async function uploadAndSend(file) {
   const form = new FormData();
   form.append("file", file);
@@ -229,12 +254,18 @@ async function uploadAndSend(file) {
   });
 }
 
+// --- 连接信息 / 二维码 ---
+
 async function loadConnectionInfo() {
   const resp = await fetch("/api/info");
   if (!resp.ok) return null;
   return resp.json();
 }
 
+/**
+ * 展示加入地址列表与二维码。
+ * 二维码优先使用 joinUrl（局域网 IP），Android 无法解析 .local 域名。
+ */
 async function showInfoDialog() {
   const info = await loadConnectionInfo();
   if (!info) {
@@ -265,10 +296,13 @@ async function showInfoDialog() {
     els.urlList.appendChild(div);
   });
 
+  // 加时间戳避免浏览器缓存旧二维码
   els.qrImage.src = `/api/qrcode?url=${encodeURIComponent(preferredURL)}&t=${Date.now()}`;
 
   els.infoDialog.showModal();
 }
+
+// --- 页面流程 ---
 
 function enterChat(name) {
   localStorage.setItem(STORAGE_KEY, name);
@@ -285,6 +319,8 @@ function leaveChat() {
   els.messages.innerHTML = "";
 }
 
+// --- 事件绑定 ---
+
 els.joinBtn.addEventListener("click", () => {
   const name = els.deviceName.value.trim() || defaultDeviceName();
   enterChat(name);
@@ -297,22 +333,27 @@ els.leaveBtn.addEventListener("click", leaveChat);
 
 els.sendBtn.addEventListener("click", sendText);
 els.messageInput.addEventListener("keydown", (e) => {
+  // Enter 发送，Shift+Enter 换行
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendText();
   }
 });
 
+// 📎 按钮触发 file input；Linux 下若无效可用 lanroom-cli
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", async () => {
   const file = els.fileInput.files?.[0];
-  els.fileInput.value = "";
+  els.fileInput.value = ""; // 允许重复选择同一文件
   if (file) await uploadAndSend(file);
 });
+
+// --- 初始化 ---
 
 const savedName = localStorage.getItem(STORAGE_KEY);
 els.deviceName.value = savedName || defaultDeviceName();
 
+// 带 ?auto=1 时跳过进入页（方便手机扫码后直接进聊天）
 if (location.search.includes("auto=1") && savedName) {
   enterChat(savedName);
 }

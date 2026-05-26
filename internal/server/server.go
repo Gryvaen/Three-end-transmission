@@ -17,6 +17,7 @@ import (
 	"three-end-transmission/internal/hub"
 	"three-end-transmission/internal/mdns"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/skip2/go-qrcode"
 )
@@ -77,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/api/info", s.handleInfo)
 	mux.HandleFunc("/api/qrcode", s.handleQRCode)
+	mux.HandleFunc("/api/send", s.handleSend)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/files/", s.handleDownload)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -156,6 +158,45 @@ func (s *Server) handleQRCode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(png)
+}
+
+type sendRequest struct {
+	Name     string             `json:"name"`
+	Platform string             `json:"platform"`
+	Payload  hub.MessagePayload `json:"payload"`
+}
+
+func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req sendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "CLI"
+	}
+	platform := hub.Platform(parsePlatform(req.Platform, ""))
+	if req.Payload.Kind == "" {
+		http.Error(w, "missing payload.kind", http.StatusBadRequest)
+		return
+	}
+
+	device := hub.Device{
+		ID:       uuid.New().String(),
+		Name:     name,
+		Platform: platform,
+	}
+	s.hub.BroadcastMessage(device, req.Payload)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
