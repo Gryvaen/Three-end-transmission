@@ -32,6 +32,7 @@ type Device struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
 	Platform Platform `json:"platform"`
+	IP       string   `json:"ip"`
 }
 
 type MessagePayload struct {
@@ -83,8 +84,23 @@ func (h *Hub) Register(client *Client) {
 	h.clients[client] = true
 	h.mu.Unlock()
 
+	h.sendWelcome(client)
 	h.broadcastPresence()
-	slog.Info("client joined", "name", client.device.Name, "id", client.device.ID)
+	slog.Info("client joined", "name", client.device.Name, "ip", client.device.IP, "id", client.device.ID)
+}
+
+func (h *Hub) sendWelcome(client *Client) {
+	body, err := json.Marshal(map[string]any{
+		"type":   "welcome",
+		"device": client.device,
+	})
+	if err != nil {
+		return
+	}
+	select {
+	case client.send <- body:
+	default:
+	}
 }
 
 func (h *Hub) Unregister(client *Client) {
@@ -160,9 +176,12 @@ func (h *Hub) broadcast(message []byte) {
 	}
 }
 
-func NewClient(h *Hub, conn *websocket.Conn, name string, platform Platform) *Client {
+func NewClient(h *Hub, conn *websocket.Conn, name string, platform Platform, ip string) *Client {
 	if name == "" {
 		name = "匿名设备"
+	}
+	if ip == "" {
+		ip = "未知"
 	}
 	return &Client{
 		hub:  h,
@@ -172,6 +191,7 @@ func NewClient(h *Hub, conn *websocket.Conn, name string, platform Platform) *Cl
 			ID:       uuid.New().String(),
 			Name:     name,
 			Platform: platform,
+			IP:       ip,
 		},
 	}
 }

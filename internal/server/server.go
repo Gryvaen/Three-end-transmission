@@ -192,6 +192,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		ID:       uuid.New().String(),
 		Name:     name,
 		Platform: platform,
+		IP:       ClientIP(r),
 	}
 	s.hub.BroadcastMessage(device, req.Payload)
 
@@ -209,7 +210,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	platform := hub.Platform(parsePlatform(r.URL.Query().Get("platform"), r.UserAgent()))
 
-	client := hub.NewClient(s.hub, conn, name, platform)
+	client := hub.NewClient(s.hub, conn, name, platform, ClientIP(r))
 	s.hub.Register(client)
 
 	go client.WritePump()

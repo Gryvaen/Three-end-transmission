@@ -91,13 +91,30 @@ function renderDevices(users) {
   els.deviceList.innerHTML = "";
   els.onlineCount.textContent = String(users.length);
 
+  const nameCount = {};
   users.forEach((user) => {
+    const name = user.name || "匿名设备";
+    nameCount[name] = (nameCount[name] || 0) + 1;
+  });
+
+  const nameIndex = {};
+
+  users.forEach((user) => {
+    let displayName = user.name || "匿名设备";
+    if (nameCount[displayName] > 1) {
+      nameIndex[displayName] = (nameIndex[displayName] || 0) + 1;
+      displayName = `${displayName} #${nameIndex[displayName]}`;
+    }
+
+    const ip = user.ip || "未知";
+
     const li = document.createElement("li");
     li.className = "device-item";
     li.innerHTML = `
       <span class="device-icon">${platformIcons[user.platform] || platformIcons.unknown}</span>
       <div>
-        <div class="device-name">${escapeHTML(user.name)}</div>
+        <div class="device-name">${escapeHTML(displayName)}</div>
+        <div class="device-ip">${escapeHTML(ip)}</div>
         <div class="device-platform">${escapeHTML(user.platform)}</div>
       </div>
     `;
@@ -203,6 +220,11 @@ function connect(name) {
 
     if (data.type === "presence") {
       renderDevices(data.users || []);
+      return;
+    }
+
+    if (data.type === "welcome") {
+      selfDevice = data.device || null;
       return;
     }
 

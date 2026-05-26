@@ -194,6 +194,12 @@ button:disabled {
   font-size: 0.92rem;
 }
 
+.device-ip {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 .device-platform {
   font-size: 0.75rem;
   color: var(--muted);
