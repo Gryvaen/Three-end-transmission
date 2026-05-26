@@ -2,15 +2,17 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>局域网互传 · LanRoom</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/platform.css" />
 </head>
 <body>
   <div id="app">
     <!-- 首次进入：设置昵称 -->
     <section id="join-screen" class="screen">
       <div class="card join-card">
+        <span id="platform-badge" class="platform-badge"></span>
         <h1>LanRoom</h1>
         <p class="subtitle">局域网聊天式互传 · 浏览器打开即用</p>
         <label for="device-name">你的设备名称</label>
@@ -21,8 +23,9 @@
     </section>
 
     <!-- 主界面 -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
     <section id="chat-screen" class="screen hidden">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <header class="sidebar-header">
           <h2>在线设备</h2>
           <span id="online-count" class="badge">0</span>
@@ -36,11 +39,16 @@
 
       <main class="chat-main">
         <header class="chat-header">
-          <div>
-            <h2>群聊</h2>
-            <p id="self-label" class="self-label"></p>
+          <div class="chat-header-left">
+            <button id="toggle-devices-btn" type="button" class="icon-btn header-devices-btn" title="在线设备">👥</button>
+            <div>
+              <h2>群聊</h2>
+              <p id="self-label" class="self-label"></p>
+            </div>
           </div>
-          <span id="conn-status" class="status offline">未连接</span>
+          <div class="chat-header-actions">
+            <span id="conn-status" class="status offline">未连接</span>
+          </div>
         </header>
 
         <div id="messages" class="messages"></div>

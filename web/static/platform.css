@@ -1,0 +1,449 @@
+/**
+ * 各平台定制 UI —— 通过 html[data-platform] 切换主题与布局
+ * android / ios：全屏聊天 + 抽屉式设备列表
+ * windows / linux / macos：桌面双栏布局
+ */
+
+/* --- Android · Material 风格 --- */
+html[data-platform="android"] {
+  --accent: #1db954;
+  --accent-hover: #1aa34a;
+  --bubble-self: #128c7e;
+  --bubble-other: #2a3942;
+  --bg: #0b141a;
+  --surface: #111b21;
+  --surface-2: #1f2c34;
+  --border: #2a3942;
+  --radius: 16px;
+  font-family: Roboto, "Noto Sans SC", system-ui, sans-serif;
+}
+
+html[data-platform="android"] #join-screen {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(29, 185, 84, 0.18), transparent 45%),
+    var(--bg);
+}
+
+html[data-platform="android"] .join-card h1::before {
+  content: "🤖 ";
+}
+
+html[data-platform="android"] body.in-chat {
+  overflow: hidden;
+  height: 100%;
+}
+
+html[data-platform="android"] body.in-chat #app {
+  height: 100%;
+}
+
+html[data-platform="android"] body.in-chat #chat-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: auto;
+}
+
+html[data-platform="android"] body.in-chat .sidebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 30;
+  max-height: min(70vh, 520px);
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  transform: translateY(-110%);
+  transition: transform 0.25s ease;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+html[data-platform="android"] body.in-chat .sidebar.open {
+  transform: translateY(0);
+  pointer-events: auto;
+  visibility: visible;
+}
+
+html[data-platform="android"] body.in-chat #device-list {
+  display: block;
+  overflow-y: auto;
+  max-height: calc(min(70vh, 520px) - 120px);
+}
+
+html[data-platform="android"] .device-item {
+  margin-bottom: 8px;
+}
+
+html[data-platform="android"] body.in-chat .sidebar-footer {
+  display: grid;
+}
+
+html[data-platform="android"] body.in-chat .composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  margin: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(calc(-1 * var(--keyboard-offset, 0px)));
+  transition: transform 0.15s ease;
+}
+
+html[data-platform="android"] body.in-chat .chat-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+}
+
+html[data-platform="android"] body.in-chat .chat-header {
+  flex-shrink: 0;
+}
+
+html[data-platform="android"] body.in-chat .messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: var(--composer-offset, 92px);
+}
+
+html[data-platform="android"] #attach-btn,
+html[data-platform="android"] #send-btn {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+}
+
+html[data-platform="android"] #send-btn {
+  border-radius: 24px;
+  min-width: 64px;
+}
+
+html[data-platform="android"] .msg-bubble {
+  border-radius: 18px 18px 18px 4px;
+}
+
+html[data-platform="android"] .msg.self .msg-bubble {
+  border-radius: 18px 18px 4px 18px;
+}
+
+/* --- iOS · Cupertino 风格 --- */
+html[data-platform="ios"] {
+  --accent: #007aff;
+  --accent-hover: #0062cc;
+  --bubble-self: #007aff;
+  --bubble-other: #3a3a3c;
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --border: #3a3a3c;
+  --radius: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+}
+
+html[data-platform="ios"] #join-screen {
+  background:
+    radial-gradient(circle at 50% -10%, rgba(0, 122, 255, 0.2), transparent 50%),
+    var(--bg);
+}
+
+html[data-platform="ios"] .join-card h1::before {
+  content: "📱 ";
+}
+
+html[data-platform="ios"] #chat-screen {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: unset;
+  height: 100dvh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+html[data-platform="ios"] .chat-header {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
+html[data-platform="ios"] .sidebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 30;
+  max-height: min(65vh, 480px);
+  background: rgba(28, 28, 30, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  transform: translateY(-110%);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html[data-platform="ios"] .sidebar.open {
+  transform: translateY(0);
+}
+
+html[data-platform="ios"] #device-list {
+  display: block;
+  overflow-y: auto;
+}
+
+html[data-platform="ios"] .sidebar-footer {
+  display: grid;
+}
+
+html[data-platform="ios"] .composer {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(12px);
+}
+
+html[data-platform="ios"] .msg-bubble {
+  border-radius: 18px;
+}
+
+html[data-platform="ios"] button {
+  border-radius: 12px;
+}
+
+/* --- Windows · Fluent 风格 --- */
+html[data-platform="windows"] {
+  --accent: #0078d4;
+  --accent-hover: #106ebe;
+  --bubble-self: #0078d4;
+  --bubble-other: #2d3748;
+  --bg: #202020;
+  --surface: #2b2b2b;
+  --surface-2: #333333;
+  --border: #3d3d3d;
+  --radius: 8px;
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+html[data-platform="windows"] #join-screen {
+  background:
+    radial-gradient(circle at top right, rgba(0, 120, 212, 0.15), transparent 40%),
+    var(--bg);
+}
+
+html[data-platform="windows"] .join-card h1::before {
+  content: "🪟 ";
+}
+
+html[data-platform="windows"] .chat-header,
+html[data-platform="windows"] .sidebar-header {
+  backdrop-filter: blur(16px);
+}
+
+html[data-platform="windows"] .msg-bubble {
+  border-radius: 8px;
+}
+
+html[data-platform="windows"] button {
+  border-radius: 6px;
+}
+
+/* --- Linux · GNOME 风格 --- */
+html[data-platform="linux"] {
+  --accent: #3584e4;
+  --accent-hover: #1c71d8;
+  --bubble-self: #1c71d8;
+  --bubble-other: #241f31;
+  --bg: #241f31;
+  --surface: #2d2739;
+  --surface-2: #3d3551;
+  --border: #4a415e;
+  --radius: 10px;
+  font-family: Cantarell, "Noto Sans SC", Ubuntu, sans-serif;
+}
+
+html[data-platform="linux"] #join-screen {
+  background:
+    radial-gradient(circle at bottom left, rgba(53, 132, 228, 0.12), transparent 45%),
+    var(--bg);
+}
+
+html[data-platform="linux"] .join-card h1::before {
+  content: "🐧 ";
+}
+
+html[data-platform="linux"] .device-item {
+  border-left: 3px solid var(--accent);
+}
+
+html[data-platform="linux"] .msg-bubble {
+  border-radius: 10px;
+}
+
+/* --- macOS · 圆角毛玻璃 --- */
+html[data-platform="macos"] {
+  --accent: #0a84ff;
+  --accent-hover: #0077ed;
+  --bubble-self: #0a84ff;
+  --bubble-other: #3a3a3c;
+  --bg: #1e1e1e;
+  --surface: #2c2c2e;
+  --surface-2: #3a3a3c;
+  --border: #48484a;
+  --radius: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+}
+
+html[data-platform="macos"] #join-screen {
+  background:
+    radial-gradient(circle at 80% 20%, rgba(10, 132, 255, 0.14), transparent 40%),
+    var(--bg);
+}
+
+html[data-platform="macos"] .join-card h1::before {
+  content: "🍎 ";
+}
+
+html[data-platform="macos"] .chat-header,
+html[data-platform="macos"] .sidebar {
+  backdrop-filter: blur(18px);
+}
+
+html[data-platform="macos"] .msg-bubble {
+  border-radius: 16px;
+}
+
+/* --- 通用：移动端设备抽屉 --- */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+html[data-platform="android"] .sidebar-backdrop.visible,
+html[data-platform="ios"] .sidebar-backdrop.visible {
+  display: block;
+  pointer-events: auto;
+}
+
+.header-devices-btn {
+  display: none;
+}
+
+html[data-platform="android"] .header-devices-btn,
+html[data-platform="ios"] .header-devices-btn {
+  display: inline-flex;
+}
+
+.icon-btn {
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.platform-badge {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+/* Android / iOS 页面高度（iOS 始终；Android 仅进入聊天后由 body.in-chat 控制） */
+html[data-platform="ios"] {
+  height: 100%;
+}
+
+html[data-platform="ios"] body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html[data-platform="ios"] #app {
+  height: 100%;
+}
+
+/* iOS：flex 布局（已验证可用） */
+html[data-platform="ios"] #chat-screen .chat-main {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+html[data-platform="ios"] #chat-screen .messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+html[data-platform="ios"] #chat-screen .composer {
+  flex-shrink: 0;
+  width: 100%;
+  z-index: 10;
+}
+
+/* 覆盖 style.css 里通用 @media 规则，避免 Android 侧边栏挤占高度 */
+@media (max-width: 768px) {
+  html[data-platform="android"] body.in-chat #chat-screen,
+  html[data-platform="ios"] #chat-screen {
+    display: flex !important;
+    grid-template-columns: unset !important;
+    grid-template-rows: unset !important;
+  }
+
+  html[data-platform="android"] body.in-chat .sidebar {
+    max-height: min(70vh, 520px) !important;
+    border-bottom: 1px solid var(--border);
+  }
+
+  html[data-platform="ios"] .sidebar {
+    max-height: min(65vh, 480px) !important;
+  }
+
+  html[data-platform="android"] body.in-chat #device-list {
+    display: block !important;
+    flex: unset !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  html[data-platform="ios"] #device-list {
+    display: block !important;
+    flex: unset !important;
+  }
+
+  html[data-platform="android"] body.in-chat .sidebar-footer,
+  html[data-platform="ios"] .sidebar-footer {
+    display: grid !important;
+  }
+}
+
+.browser-hint {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}

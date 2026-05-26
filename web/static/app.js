@@ -14,10 +14,60 @@ const platformIcons = {
   unknown: "💻",
 };
 
+/** 各平台 UI 文案与主题色 */
+const platformUI = {
+  android: {
+    badge: "Android 版",
+    subtitle: "Material 风格 · 点击 👥 查看在线设备",
+    namePlaceholder: "例如：小明的手机",
+    composerPlaceholder: "发消息…",
+    themeColor: "#111b21",
+  },
+  ios: {
+    badge: "iOS 版",
+    subtitle: "轻触即用 · 支持添加到主屏幕",
+    namePlaceholder: "例如：iPhone",
+    composerPlaceholder: "iMessage…",
+    themeColor: "#000000",
+  },
+  windows: {
+    badge: "Windows 版",
+    subtitle: "Fluent 风格 · 左侧查看在线设备",
+    namePlaceholder: "例如：DESKTOP-PC",
+    composerPlaceholder: "输入消息…",
+    themeColor: "#202020",
+  },
+  linux: {
+    badge: "Linux 版",
+    subtitle: "GNOME 风格 · 文件可用 lanroom-cli 发送",
+    namePlaceholder: "例如：arch-pc",
+    composerPlaceholder: "输入消息…",
+    themeColor: "#241f31",
+  },
+  macos: {
+    badge: "macOS 版",
+    subtitle: "桌面风格 · 左侧查看在线设备",
+    namePlaceholder: "例如：MacBook",
+    composerPlaceholder: "输入消息…",
+    themeColor: "#1e1e1e",
+  },
+  unknown: {
+    badge: "网页版",
+    subtitle: "局域网聊天式互传 · 浏览器打开即用",
+    namePlaceholder: "例如：我的设备",
+    composerPlaceholder: "输入消息…",
+    themeColor: "#0f1419",
+  },
+};
+
 // DOM 引用集中管理，避免重复 querySelector
 const els = {
   joinScreen: document.getElementById("join-screen"),
   chatScreen: document.getElementById("chat-screen"),
+  sidebar: document.getElementById("sidebar"),
+  sidebarBackdrop: document.getElementById("sidebar-backdrop"),
+  platformBadge: document.getElementById("platform-badge"),
+  toggleDevicesBtn: document.getElementById("toggle-devices-btn"),
   deviceName: document.getElementById("device-name"),
   joinBtn: document.getElementById("join-btn"),
   showInfoBtn: document.getElementById("show-info-btn"),
@@ -54,6 +104,98 @@ function detectPlatform() {
   if (ua.includes("mac os") || ua.includes("macintosh")) return "macos";
   if (ua.includes("linux")) return "linux";
   return "unknown";
+}
+
+function isIOSChrome() {
+  return /CriOS/i.test(navigator.userAgent);
+}
+
+/** Android：动态计算输入栏高度与键盘偏移，避免被挡住 */
+function initAndroidViewportFix() {
+  if (detectPlatform() !== "android") return;
+
+  const composer = document.querySelector(".composer");
+  if (!composer) return;
+
+  const update = () => {
+    const h = composer.getBoundingClientRect().height;
+    document.documentElement.style.setProperty("--composer-offset", `${Math.ceil(h + 12)}px`);
+
+    let keyboardOffset = 0;
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      keyboardOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    }
+    document.documentElement.style.setProperty("--keyboard-offset", `${keyboardOffset}px`);
+  };
+
+  update();
+  window.addEventListener("resize", update);
+  window.addEventListener("orientationchange", update);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", update);
+    window.visualViewport.addEventListener("scroll", update);
+  }
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(update).observe(composer);
+  }
+}
+
+/** 按平台应用主题、文案与布局（html[data-platform]） */
+function initPlatformUI() {
+  const platform = detectPlatform();
+  const ui = platformUI[platform] || platformUI.unknown;
+
+  document.documentElement.dataset.platform = platform;
+
+  if (els.platformBadge) els.platformBadge.textContent = ui.badge;
+
+  const subtitle = document.querySelector(".subtitle");
+  if (subtitle) subtitle.textContent = ui.subtitle;
+
+  els.deviceName.placeholder = ui.namePlaceholder;
+  els.messageInput.placeholder = ui.composerPlaceholder;
+
+  let themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (!themeMeta) {
+    themeMeta = document.createElement("meta");
+    themeMeta.name = "theme-color";
+    document.head.appendChild(themeMeta);
+  }
+  themeMeta.content = ui.themeColor;
+
+  if (platform === "ios") {
+    let capable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
+    if (!capable) {
+      capable = document.createElement("meta");
+      capable.name = "apple-mobile-web-app-capable";
+      capable.content = "yes";
+      document.head.appendChild(capable);
+    }
+  }
+
+  if (isIOSChrome()) {
+    const card = document.querySelector(".join-card");
+    if (card && !document.getElementById("ios-chrome-hint")) {
+      const hint = document.createElement("p");
+      hint.id = "ios-chrome-hint";
+      hint.className = "browser-hint";
+      hint.textContent =
+        "iOS 的 Chrome 常无法打开 .local 地址。请改用 Safari，或在地址栏输入局域网 IP（如 http://192.168.x.x:8787）。";
+      card.insertBefore(hint, card.querySelector(".subtitle"));
+    }
+  }
+}
+
+function isMobilePlatform() {
+  const p = document.documentElement.dataset.platform;
+  return p === "android" || p === "ios";
+}
+
+function setDevicesPanel(open) {
+  if (!isMobilePlatform()) return;
+  els.sidebar?.classList.toggle("open", open);
+  els.sidebarBackdrop?.classList.toggle("visible", open);
 }
 
 function defaultDeviceName() {
@@ -370,14 +512,19 @@ async function showInfoDialog() {
 
 function enterChat(name) {
   localStorage.setItem(STORAGE_KEY, name);
+  document.body.classList.add("in-chat");
   els.joinScreen.classList.add("hidden");
   els.chatScreen.classList.remove("hidden");
   els.selfLabel.textContent = `当前身份：${name}`;
+  setDevicesPanel(false);
+  initAndroidViewportFix();
   connect(name);
 }
 
 function leaveChat() {
   if (ws) ws.close();
+  document.body.classList.remove("in-chat");
+  setDevicesPanel(false);
   els.chatScreen.classList.add("hidden");
   els.joinScreen.classList.remove("hidden");
   els.messages.innerHTML = "";
@@ -394,6 +541,11 @@ els.showInfoBtn.addEventListener("click", showInfoDialog);
 els.infoPanelBtn.addEventListener("click", showInfoDialog);
 els.closeInfoBtn.addEventListener("click", () => els.infoDialog.close());
 els.leaveBtn.addEventListener("click", leaveChat);
+
+els.toggleDevicesBtn?.addEventListener("click", () => {
+  setDevicesPanel(!els.sidebar?.classList.contains("open"));
+});
+els.sidebarBackdrop?.addEventListener("click", () => setDevicesPanel(false));
 
 els.messages.addEventListener("click", (e) => {
   const btn = e.target.closest(".download-btn");
@@ -420,6 +572,8 @@ els.fileInput.addEventListener("change", async () => {
 });
 
 // --- 初始化 ---
+
+initPlatformUI();
 
 const savedName = localStorage.getItem(STORAGE_KEY);
 els.deviceName.value = savedName || defaultDeviceName();

@@ -232,6 +232,8 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -242,6 +244,21 @@ button:disabled {
   border-bottom: 1px solid var(--border);
   background: rgba(26, 35, 50, 0.8);
   backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .chat-header h2 {
@@ -273,11 +290,14 @@ button:disabled {
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .msg {
@@ -346,6 +366,7 @@ button:disabled {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
   background: var(--surface);
+  flex-shrink: 0;
 }
 
 #attach-btn {
