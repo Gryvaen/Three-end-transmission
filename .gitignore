@@ -1,0 +1,15 @@
+# 忽略编译产物
+/lanroom
+/lanroom.exe
+*.exe
+
+# Go
+/vendor/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 上传临时文件（本地调试）
+uploads/

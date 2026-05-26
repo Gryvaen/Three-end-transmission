@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>局域网互传 · LanRoom</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 首次进入：设置昵称 -->
+    <section id="join-screen" class="screen">
+      <div class="card join-card">
+        <h1>LanRoom</h1>
+        <p class="subtitle">局域网聊天式互传 · 浏览器打开即用</p>
+        <label for="device-name">你的设备名称</label>
+        <input id="device-name" type="text" placeholder="例如：小明的 Android" maxlength="32" />
+        <button id="join-btn" type="button">进入聊天室</button>
+        <button id="show-info-btn" type="button" class="link-btn">查看连接地址 / 二维码</button>
+      </div>
+    </section>
+
+    <!-- 主界面 -->
+    <section id="chat-screen" class="screen hidden">
+      <aside class="sidebar">
+        <header class="sidebar-header">
+          <h2>在线设备</h2>
+          <span id="online-count" class="badge">0</span>
+        </header>
+        <ul id="device-list"></ul>
+        <div class="sidebar-footer">
+          <button id="info-panel-btn" type="button">连接信息</button>
+          <button id="leave-btn" type="button" class="danger">离开</button>
+        </div>
+      </aside>
+
+      <main class="chat-main">
+        <header class="chat-header">
+          <div>
+            <h2>群聊</h2>
+            <p id="self-label" class="self-label"></p>
+          </div>
+          <span id="conn-status" class="status offline">未连接</span>
+        </header>
+
+        <div id="messages" class="messages"></div>
+
+        <footer class="composer">
+          <input id="file-input" type="file" hidden />
+          <button id="attach-btn" type="button" title="发送文件">📎</button>
+          <textarea id="message-input" rows="1" placeholder="输入消息…"></textarea>
+          <button id="send-btn" type="button">发送</button>
+        </footer>
+      </main>
+    </section>
+
+    <!-- 连接信息弹层 -->
+    <dialog id="info-dialog">
+      <div class="dialog-body">
+        <h3>连接本聊天室</h3>
+        <p class="hint">IP 变化时，优先使用 <strong>.local</strong> 地址或重新扫码</p>
+        <div id="url-list" class="url-list"></div>
+        <div class="qr-wrap">
+          <img id="qr-image" alt="加入房间二维码" width="220" height="220" />
+          <p class="qr-caption">手机扫码加入（推荐）</p>
+        </div>
+        <button id="close-info-btn" type="button">关闭</button>
+      </div>
+    </dialog>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
