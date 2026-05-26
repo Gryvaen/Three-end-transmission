@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,7 +324,21 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	record := raw.(fileRecord)
 
 	w.Header().Set("Content-Type", record.Mime)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, record.Name))
+	// filename* 支持中文等非 ASCII 文件名
+	asciiName := strings.Map(func(r rune) rune {
+		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' {
+			return r
+		}
+		return '_'
+	}, record.Name)
+	if asciiName == "" {
+		asciiName = "download"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="%s"; filename*=UTF-8''%s`,
+		asciiName,
+		url.PathEscape(record.Name),
+	))
 	http.ServeFile(w, r, record.Path)
 }
 

@@ -15,6 +15,8 @@ const (
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 512 * 1024
+
+	DefaultHistoryTTL = 10 * time.Minute
 )
 
 type Platform string
@@ -63,13 +65,17 @@ type Client struct {
 }
 
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[*Client]bool
+	mu         sync.RWMutex
+	clients    map[*Client]bool
+	history    []ChatMessage
+	historyTTL time.Duration
 }
 
 func New() *Hub {
 	return &Hub{
-		clients: make(map[*Client]bool),
+		clients:    make(map[*Client]bool),
+		history:    make([]ChatMessage, 0, 64),
+		historyTTL: DefaultHistoryTTL,
 	}
 }
 
@@ -85,6 +91,7 @@ func (h *Hub) Register(client *Client) {
 	h.mu.Unlock()
 
 	h.sendWelcome(client)
+	h.sendHistory(client)
 	h.broadcastPresence()
 	slog.Info("client joined", "name", client.device.Name, "ip", client.device.IP, "id", client.device.ID)
 }
@@ -101,6 +108,42 @@ func (h *Hub) sendWelcome(client *Client) {
 	case client.send <- body:
 	default:
 	}
+}
+
+func (h *Hub) sendHistory(client *Client) {
+	h.mu.RLock()
+	msgs := append([]ChatMessage(nil), h.history...)
+	h.mu.RUnlock()
+
+	if len(msgs) == 0 {
+		return
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"type":     "history",
+		"messages": msgs,
+	})
+	if err != nil {
+		return
+	}
+	select {
+	case client.send <- body:
+	default:
+	}
+}
+
+func (h *Hub) addToHistory(msg ChatMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	cutoff := time.Now().Add(-h.historyTTL).Unix()
+	kept := h.history[:0]
+	for _, m := range h.history {
+		if m.Timestamp >= cutoff {
+			kept = append(kept, m)
+		}
+	}
+	h.history = append(kept, msg)
 }
 
 func (h *Hub) Unregister(client *Client) {
@@ -157,6 +200,7 @@ func (h *Hub) BroadcastMessage(from Device, payload MessagePayload) {
 	if err != nil {
 		return
 	}
+	h.addToHistory(msg)
 	h.broadcast(body)
 }
 

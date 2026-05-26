@@ -16,6 +16,7 @@ Android / Windows / Linux / iOS 只需 **打开浏览器**，无需安装客户�
 | mDNS（`http://主机名.local:8787`） | ✅ |
 | 启动页二维码（IP 变化时扫码） | ✅ |
 | 断线自动重连 | ✅ |
+| 10 分钟聊天历史（新设备可回看） | ✅ |
 | Linux 命令行发送（echo/cat） | ✅ |
 
 ---
@@ -229,7 +230,23 @@ ws://<host>:8787/ws?name=设备名&platform=android
 {
   "type": "presence",
   "users": [
-    { "id": "...", "name": "Pixel", "platform": "android" }
+    { "id": "...", "name": "Pixel", "platform": "android", "ip": "192.168.1.5" }
+  ]
+}
+```
+
+**历史记录（新连接时推送，保留 10 分钟）：**
+
+```json
+{
+  "type": "history",
+  "messages": [
+    {
+      "type": "message",
+      "from": { "id": "...", "name": "Windows PC", "platform": "windows", "ip": "192.168.1.3" },
+      "payload": { "kind": "text", "content": "你好" },
+      "timestamp": 1710000000
+    }
   ]
 }
 ```

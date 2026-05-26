@@ -131,6 +131,14 @@ function escapeHTML(str) {
     .replaceAll('"', "&quot;");
 }
 
+function escapeAttr(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll("'", "&#39;");
+}
+
 /**
  * 将服务端广播的消息渲染到聊天区。
  * payload.kind: text | image | file
@@ -154,14 +162,15 @@ function appendMessage(msg, isSelf) {
   } else if (payload.kind === "file") {
     const name = payload.meta?.name || "文件";
     const size = payload.meta?.size ? formatSize(payload.meta.size) : "";
+    const safeName = escapeHTML(name);
     body = `
       <div class="msg-bubble">
         <div class="file-card">
           <span>📎</span>
           <div>
-            <div>${escapeHTML(name)}</div>
+            <div>${safeName}</div>
             <small>${size}</small><br />
-            <a href="/api/files/${payload.fileId}" download>下载</a>
+            <button type="button" class="download-btn" data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}">下载</button>
           </div>
         </div>
       </div>`;
@@ -176,6 +185,30 @@ function appendMessage(msg, isSelf) {
 
   els.messages.appendChild(wrapper);
   els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+/** 通过 fetch + Blob 下载（Linux/dwm 下比 <a download> 可靠） */
+async function downloadFile(fileId, fileName) {
+  if (!fileId) return;
+  try {
+    const resp = await fetch(`/api/files/${fileId}`);
+    if (!resp.ok) {
+      alert("下载失败，文件可能已过期");
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName || "download";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    alert(`下载失败：${err.message}`);
+  }
 }
 
 // --- WebSocket ---
@@ -225,6 +258,15 @@ function connect(name) {
 
     if (data.type === "welcome") {
       selfDevice = data.device || null;
+      return;
+    }
+
+    if (data.type === "history") {
+      els.messages.innerHTML = "";
+      (data.messages || []).forEach((msg) => {
+        const isSelf = selfDevice && msg.from?.id === selfDevice.id;
+        appendMessage(msg, isSelf);
+      });
       return;
     }
 
@@ -352,6 +394,13 @@ els.showInfoBtn.addEventListener("click", showInfoDialog);
 els.infoPanelBtn.addEventListener("click", showInfoDialog);
 els.closeInfoBtn.addEventListener("click", () => els.infoDialog.close());
 els.leaveBtn.addEventListener("click", leaveChat);
+
+els.messages.addEventListener("click", (e) => {
+  const btn = e.target.closest(".download-btn");
+  if (!btn) return;
+  e.preventDefault();
+  downloadFile(btn.dataset.fileId, btn.dataset.fileName);
+});
 
 els.sendBtn.addEventListener("click", sendText);
 els.messageInput.addEventListener("keydown", (e) => {
