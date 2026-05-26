@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+lanroom
+lanroom-cli
+lanroom.exe
+*.exe
+uploads/

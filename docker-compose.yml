@@ -1,0 +1,25 @@
+# LanRoom 一键部署
+# 启动：docker compose up -d --build
+# 访问：http://<宿主机局域网 IP>:8787
+
+services:
+  lanroom:
+    build: .
+    image: lanroom:latest
+    container_name: lanroom
+    restart: unless-stopped
+    ports:
+      - "${LANROOM_PORT:-8787}:8787"
+    environment:
+      LANROOM_UPLOAD_DIR: /data/uploads
+    volumes:
+      - lanroom-uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8787/api/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  lanroom-uploads:

@@ -34,10 +34,13 @@ func main() {
 		slog.Warn("mDNS registration failed, QR/IP fallback still works", "err", err)
 	}
 
+	uploadDir := os.Getenv("LANROOM_UPLOAD_DIR")
+
 	srv := server.New(server.Config{
-		Port:     *port,
-		StaticFS: http.FS(static),
-		Mdns:     reg,
+		Port:      *port,
+		StaticFS:  http.FS(static),
+		Mdns:      reg,
+		UploadDir: uploadDir,
 	})
 	srv.StartFileCleanup()
 

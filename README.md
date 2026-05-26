@@ -8,17 +8,19 @@ Android / Windows / Linux / iOS 只需 **打开浏览器**，无需安装客户�
 
 ## 功能概览
 
-| 功能 | 状态 |
-|------|------|
-| WebSocket 群聊（文字） | ✅ |
-| 在线设备列表（显示平台图标） | ✅ |
-| 图片 / 文件上传与下载 | ✅ |
-| mDNS（`http://主机名.local:8787`） | ✅ |
-| 启动页二维码（IP 变化时扫码） | ✅ |
-| 断线自动重连 | ✅ |
-| 10 分钟聊天历史（新设备可回看） | ✅ |
-| 各平台定制浏览器 UI | ✅ |
-| Linux 命令行发送（echo/cat） | ✅ |
+
+| 功能                            | 状态  |
+| ----------------------------- | --- |
+| WebSocket 群聊（文字）              | ✅   |
+| 在线设备列表（显示平台图标）                | ✅   |
+| 图片 / 文件上传与下载                  | ✅   |
+| mDNS（`http://主机名.local:8787`） | ✅   |
+| 启动页二维码（IP 变化时扫码）              | ✅   |
+| 断线自动重连                        | ✅   |
+| 10 分钟聊天历史（新设备可回看）             | ✅   |
+| 各平台定制浏览器 UI                   | ✅   |
+| Linux 命令行发送（echo/cat）         | ✅   |
+
 
 ---
 
@@ -71,21 +73,25 @@ export LANROOM_HOST=http://127.0.0.1:8787
 echo "发送" | ./lanroom-cli
 ```
 
-| 值 | 说明 |
-|----|------|
-| `http://主机名.local:8787` | **推荐**，适应动态 IP |
-| `http://192.168.x.x:8787` | 局域网 IP，IP 变需更新 |
-| `auto` | mDNS 自动发现 Hub |
-| 未设置 | 先自动发现，失败则用 `127.0.0.1:8787` |
+
+| 值                         | 说明                          |
+| ------------------------- | --------------------------- |
+| `http://主机名.local:8787`   | **推荐**，适应动态 IP              |
+| `http://192.168.x.x:8787` | 局域网 IP，IP 变需更新              |
+| `auto`                    | mDNS 自动发现 Hub               |
+| 未设置                       | 先自动发现，失败则用 `127.0.0.1:8787` |
+
 
 使用 `.local` 或 `auto` 前，请先在 Hub 机器上安装 Avahi，见 [Linux 前置条件：Avahi](#linux-前置条件avahimdns)。
 
 > **注意：** 命令行发送需要先 **重启 Hub**（`go run .`）以加载 `/api/send` 接口。  
 > 若报 `404 page not found`，通常是 mDNS 连到了**旧 Hub 进程**（以前测试留在 8790/8799 等端口）。结束旧进程后重试：
+>
 > ```bash
 > pkill -f 'lanroom|three-end-trans'
 > go run . -port 8787
 > ```
+>
 > 或显式指定：`LANROOM_HOST=http://127.0.0.1:8787 ./lanroom-cli -t "你好"`
 
 ---
@@ -154,11 +160,13 @@ level=INFO msg="hub started" addr=:8787
 
 **任选一种方式进入：**
 
-| 方式 | 地址示例 | 说明 |
-|------|----------|------|
+
+| 方式       | 地址示例                      | 说明       |
+| -------- | ------------------------- | -------- |
 | mDNS（推荐） | `http://你的电脑名.local:8787` | IP 变了也能用 |
-| 局域网 IP | `http://192.168.x.x:8787` | 启动后终端会打印 |
-| 二维码 | 页面点「查看连接地址 / 二维码」 | 手机扫一下 |
+| 局域网 IP   | `http://192.168.x.x:8787` | 启动后终端会打印 |
+| 二维码      | 页面点「查看连接地址 / 二维码」         | 手机扫一下    |
+
 
 每台设备：输入昵称 → **进入聊天室** → 即可像群聊一样发文字、图片、文件。
 
@@ -175,11 +183,71 @@ go build -o lanroom .
 
 ---
 
+## Docker 一键部署
+
+无需安装 Go，适合 NAS、服务器或长期运行 Hub。
+
+### 启动
+
+```bash
+docker compose up -d --build
+```
+
+默认监听 **8787** 端口。浏览器访问：
+
+```
+http://<宿主机局域网 IP>:8787
+```
+
+手机可在页面内点「查看连接地址 / 二维码」扫码加入。
+
+### 常用命令
+
+```bash
+# 查看日志
+docker compose logs -f
+
+# 停止
+docker compose down
+
+# 自定义端口（例：8888）
+LANROOM_PORT=8888 docker compose up -d --build
+```
+
+### 数据持久化
+
+上传的文件保存在 Docker 卷 `lanroom-uploads` 中，容器重建后仍保留（与 10 分钟聊天历史独立；历史仍在内存中，重启 Hub 会清空）。
+
+### mDNS / `.local` 域名（可选）
+
+Bridge 网络下，容器内的 mDNS 通常**无法**被局域网其他设备发现。若需要 `http://主机名.local:8787`，在 **Linux 宿主机**上使用 host 网络：
+
+```bash
+docker compose -f docker-compose.host.yml up -d --build
+```
+
+宿主机需安装 Avahi（见 [Linux 前置条件](#linux-前置条件avahimdns)）。  
+**Mac / Windows Docker Desktop 不支持 host 网络**，请直接用局域网 IP 或二维码。
+
+### 环境变量
+
+
+| 变量                   | 说明               | 默认              |
+| -------------------- | ---------------- | --------------- |
+| `LANROOM_PORT`       | 宿主机映射端口（compose） | `8787`          |
+| `LANROOM_UPLOAD_DIR` | 容器内上传目录          | `/data/uploads` |
+
+
+---
+
 ## 项目结构
 
 ```
 Three_end_transmission/
 ├── main.go                 # 入口：启动 HTTP + mDNS
+├── Dockerfile              # 容器镜像
+├── docker-compose.yml      # 一键部署（端口映射）
+├── docker-compose.host.yml # Linux host 网络（mDNS）
 ├── internal/
 │   ├── hub/                # WebSocket 群聊 Hub
 │   ├── mdns/               # mDNS 服务注册
@@ -254,13 +322,15 @@ ws://<host>:8787/ws?name=设备名&platform=android
 
 ### HTTP
 
-| 路径 | 方法 | 说明 |
-|------|------|------|
-| `/api/info` | GET | 返回 mDNS 地址、本机 IP 列表、推荐加入地址 |
-| `/api/qrcode` | GET | 返回加入地址的 PNG 二维码（可选 `?url=`） |
-| `/api/send` | POST | 命令行/脚本发送消息（JSON） |
-| `/api/upload` | POST | `multipart/form-data`，字段名 `file` |
-| `/api/files/{id}` | GET | 下载已上传文件 |
+
+| 路径                | 方法   | 说明                               |
+| ----------------- | ---- | -------------------------------- |
+| `/api/info`       | GET  | 返回 mDNS 地址、本机 IP 列表、推荐加入地址       |
+| `/api/qrcode`     | GET  | 返回加入地址的 PNG 二维码（可选 `?url=`）      |
+| `/api/send`       | POST | 命令行/脚本发送消息（JSON）                 |
+| `/api/upload`     | POST | `multipart/form-data`，字段名 `file` |
+| `/api/files/{id}` | GET  | 下载已上传文件                          |
+
 
 ---
 
@@ -326,16 +396,6 @@ Hub 重启后文件记录会丢失（MVP 行为，后续可加持久化）。
 
 ---
 
-## 下一步可扩展
-
-- [ ] 房间 PIN 码 / 多房间
-- [ ] 剪贴板一键发送
-- [ ] 大文件 WebRTC 直传（减轻 Hub 压力）
-- [ ] 消息历史持久化
-- [ ] Docker 一键部署
-
----
-
 ## 许可证
 
-MIT（可按需修改）
+MIT
