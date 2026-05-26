@@ -28,92 +28,22 @@ html[data-platform="android"] .join-card h1::before {
   content: "🤖 ";
 }
 
-html[data-platform="android"] body.in-chat {
-  overflow: hidden;
-  height: 100%;
-}
-
-html[data-platform="android"] body.in-chat #app {
-  height: 100%;
-}
-
-html[data-platform="android"] body.in-chat #chat-screen {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  height: auto;
-}
-
-html[data-platform="android"] body.in-chat .sidebar {
-  position: fixed;
-  inset: 0 0 auto 0;
-  z-index: 30;
-  max-height: min(70vh, 520px);
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0 0 20px 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  transform: translateY(-110%);
-  transition: transform 0.25s ease;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-html[data-platform="android"] body.in-chat .sidebar.open {
-  transform: translateY(0);
-  pointer-events: auto;
-  visibility: visible;
-}
-
-html[data-platform="android"] body.in-chat #device-list {
-  display: block;
+html[data-platform="android"] #join-screen,
+html[data-platform="ios"] #join-screen {
+  min-height: 100dvh;
+  min-height: 100svh;
+  align-items: flex-start;
   overflow-y: auto;
-  max-height: calc(min(70vh, 520px) - 120px);
+  -webkit-overflow-scrolling: touch;
+  padding:
+    max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
 }
 
 html[data-platform="android"] .device-item {
   margin-bottom: 8px;
-}
-
-html[data-platform="android"] body.in-chat .sidebar-footer {
-  display: grid;
-}
-
-html[data-platform="android"] body.in-chat .composer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 50;
-  margin: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-  transform: translateY(calc(-1 * var(--keyboard-offset, 0px)));
-  transition: transform 0.15s ease;
-}
-
-html[data-platform="android"] body.in-chat .chat-main {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  width: 100%;
-}
-
-html[data-platform="android"] body.in-chat .chat-header {
-  flex-shrink: 0;
-}
-
-html[data-platform="android"] body.in-chat .messages {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-bottom: var(--composer-offset, 92px);
 }
 
 html[data-platform="android"] #attach-btn,
@@ -158,52 +88,6 @@ html[data-platform="ios"] #join-screen {
 
 html[data-platform="ios"] .join-card h1::before {
   content: "📱 ";
-}
-
-html[data-platform="ios"] #chat-screen {
-  display: flex;
-  flex-direction: column;
-  grid-template-columns: unset;
-  height: 100dvh;
-  height: 100vh;
-  overflow: hidden;
-}
-
-html[data-platform="ios"] .chat-header {
-  padding-top: calc(12px + env(safe-area-inset-top, 0px));
-}
-
-html[data-platform="ios"] .sidebar {
-  position: fixed;
-  inset: 0 0 auto 0;
-  z-index: 30;
-  max-height: min(65vh, 480px);
-  background: rgba(28, 28, 30, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  transform: translateY(-110%);
-  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-html[data-platform="ios"] .sidebar.open {
-  transform: translateY(0);
-}
-
-html[data-platform="ios"] #device-list {
-  display: block;
-  overflow-y: auto;
-}
-
-html[data-platform="ios"] .sidebar-footer {
-  display: grid;
-}
-
-html[data-platform="ios"] .composer {
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  background: rgba(28, 28, 30, 0.95);
-  backdrop-filter: blur(12px);
 }
 
 html[data-platform="ios"] .msg-bubble {
@@ -366,74 +250,153 @@ html[data-platform="ios"] .header-devices-btn {
   border: 1px solid var(--border);
 }
 
-/* Android / iOS 页面高度（iOS 始终；Android 仅进入聊天后由 body.in-chat 控制） */
-html[data-platform="ios"] {
-  height: 100%;
-}
-
-html[data-platform="ios"] body {
-  height: 100%;
+/* --- 移动端聊天布局（进入聊天室后启用，Android / iOS 共用） --- */
+html[data-platform="android"] body.in-chat,
+html[data-platform="ios"] body.in-chat {
   overflow: hidden;
+  height: 100%;
+  height: 100dvh;
 }
 
-html[data-platform="ios"] #app {
+html[data-platform="android"] body.in-chat #app,
+html[data-platform="ios"] body.in-chat #app {
   height: 100%;
 }
 
-/* iOS：flex 布局（已验证可用） */
-html[data-platform="ios"] #chat-screen .chat-main {
+html[data-platform="android"] body.in-chat #chat-screen,
+html[data-platform="ios"] body.in-chat #chat-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  height: 100dvh;
+}
+
+html[data-platform="android"] body.in-chat .sidebar,
+html[data-platform="ios"] body.in-chat .sidebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 30;
+  max-height: min(70vh, 520px);
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  transform: translateY(-110%);
+  transition: transform 0.25s ease;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+html[data-platform="ios"] body.in-chat .sidebar {
+  max-height: min(65vh, 480px);
+  background: rgba(28, 28, 30, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html[data-platform="android"] body.in-chat .sidebar.open,
+html[data-platform="ios"] body.in-chat .sidebar.open {
+  transform: translateY(0);
+  pointer-events: auto;
+  visibility: visible;
+}
+
+html[data-platform="android"] body.in-chat #device-list,
+html[data-platform="ios"] body.in-chat #device-list {
+  display: block;
+  overflow-y: auto;
+  max-height: calc(min(70vh, 520px) - 120px);
+}
+
+html[data-platform="ios"] body.in-chat #device-list {
+  max-height: calc(min(65vh, 480px) - 120px);
+}
+
+html[data-platform="android"] body.in-chat .sidebar-footer,
+html[data-platform="ios"] body.in-chat .sidebar-footer {
+  display: grid;
+}
+
+html[data-platform="android"] body.in-chat .chat-main,
+html[data-platform="ios"] body.in-chat .chat-main {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   width: 100%;
-  height: 100%;
 }
 
-html[data-platform="ios"] #chat-screen .messages {
+html[data-platform="android"] body.in-chat .chat-header,
+html[data-platform="ios"] body.in-chat .chat-header {
+  flex-shrink: 0;
+}
+
+html[data-platform="ios"] body.in-chat .chat-header {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
+html[data-platform="android"] body.in-chat .messages,
+html[data-platform="ios"] body.in-chat .messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-bottom: var(--composer-offset, 92px);
+  -webkit-overflow-scrolling: touch;
 }
 
-html[data-platform="ios"] #chat-screen .composer {
-  flex-shrink: 0;
+html[data-platform="android"] body.in-chat .composer,
+html[data-platform="ios"] body.in-chat .composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  margin: 0;
   width: 100%;
-  z-index: 10;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(calc(-1 * var(--keyboard-offset, 0px)));
+  transition: transform 0.15s ease;
 }
 
-/* 覆盖 style.css 里通用 @media 规则，避免 Android 侧边栏挤占高度 */
+html[data-platform="ios"] body.in-chat .composer {
+  background: rgba(28, 28, 30, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* 覆盖 style.css 通用 @media，避免与移动端抽屉布局冲突 */
 @media (max-width: 768px) {
   html[data-platform="android"] body.in-chat #chat-screen,
-  html[data-platform="ios"] #chat-screen {
+  html[data-platform="ios"] body.in-chat #chat-screen {
     display: flex !important;
     grid-template-columns: unset !important;
     grid-template-rows: unset !important;
   }
 
-  html[data-platform="android"] body.in-chat .sidebar {
-    max-height: min(70vh, 520px) !important;
-    border-bottom: 1px solid var(--border);
-  }
-
-  html[data-platform="ios"] .sidebar {
-    max-height: min(65vh, 480px) !important;
-  }
-
-  html[data-platform="android"] body.in-chat #device-list {
+  html[data-platform="android"] body.in-chat #device-list,
+  html[data-platform="ios"] body.in-chat #device-list {
     display: block !important;
     flex: unset !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
   }
 
-  html[data-platform="ios"] #device-list {
-    display: block !important;
-    flex: unset !important;
+  html[data-platform="android"] body.in-chat .sidebar-footer,
+  html[data-platform="ios"] body.in-chat .sidebar-footer {
+    display: grid !important;
   }
 
-  html[data-platform="android"] body.in-chat .sidebar-footer,
-  html[data-platform="ios"] .sidebar-footer {
-    display: grid !important;
+  html[data-platform="android"] .msg,
+  html[data-platform="ios"] .msg {
+    max-width: 88%;
   }
 }
 

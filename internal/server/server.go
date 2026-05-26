@@ -74,6 +74,30 @@ func New(cfg Config) *Server {
 	}
 }
 
+func (s *Server) StartFileCleanup() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.purgeExpiredFiles(hub.DefaultHistoryTTL)
+		}
+	}()
+}
+
+func (s *Server) purgeExpiredFiles(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	s.files.Range(func(key, value any) bool {
+		record := value.(fileRecord)
+		if record.CreatedAt.Before(cutoff) {
+			s.files.Delete(key)
+			if err := os.Remove(record.Path); err != nil && !os.IsNotExist(err) {
+				slog.Warn("remove expired upload failed", "id", key, "err", err)
+			}
+		}
+		return true
+	})
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -91,10 +115,9 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) joinURLs() []string {
-	urls := make([]string, 0)
-
-	for _, ip := range LANIPv4Addresses() {
+func (s *Server) joinURLs(lanIPs []string) []string {
+	urls := make([]string, 0, len(lanIPs)+1)
+	for _, ip := range lanIPs {
 		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.cfg.Port))
 	}
 	if s.cfg.Mdns != nil {
@@ -103,8 +126,7 @@ func (s *Server) joinURLs() []string {
 	return urls
 }
 
-func (s *Server) preferredJoinURL() string {
-	lanIPs := LANIPv4Addresses()
+func (s *Server) preferredJoinURL(lanIPs []string) string {
 	if len(lanIPs) > 0 {
 		return fmt.Sprintf("http://%s:%d", lanIPs[0], s.cfg.Port)
 	}
@@ -116,13 +138,13 @@ func (s *Server) preferredJoinURL() string {
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	ips := LANIPv4Addresses()
-	urls := s.joinURLs()
+	urls := s.joinURLs(ips)
 
 	resp := infoResponse{
 		Port:        s.cfg.Port,
 		LocalIPs:    ips,
 		URLs:        urls,
-		JoinURL:     s.preferredJoinURL(),
+		JoinURL:     s.preferredJoinURL(ips),
 		ClientCount: s.hub.ClientCount(),
 	}
 	if s.cfg.Mdns != nil {
@@ -142,7 +164,7 @@ func (s *Server) handleQRCode(w http.ResponseWriter, r *http.Request) {
 
 	target := strings.TrimSpace(r.URL.Query().Get("url"))
 	if target == "" {
-		target = s.preferredJoinURL()
+		target = s.preferredJoinURL(LANIPv4Addresses())
 	}
 	if target == "" {
 		http.Error(w, "no join url available", http.StatusBadRequest)
@@ -174,6 +196,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req sendRequest
+	r.Body = http.MaxBytesReader(w, r.Body, hub.MaxMessageSize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -183,7 +206,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "CLI"
 	}
-	platform := hub.Platform(parsePlatform(req.Platform, ""))
+	platform := hub.ParsePlatform(req.Platform, "")
 	if req.Payload.Kind == "" {
 		http.Error(w, "missing payload.kind", http.StatusBadRequest)
 		return
@@ -209,34 +232,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	platform := hub.Platform(parsePlatform(r.URL.Query().Get("platform"), r.UserAgent()))
+	platform := hub.ParsePlatform(r.URL.Query().Get("platform"), r.UserAgent())
 
 	client := hub.NewClient(s.hub, conn, name, platform, ClientIP(r))
 	s.hub.Register(client)
 
 	go client.WritePump()
 	go client.ReadPump()
-}
-
-func parsePlatform(explicit, userAgent string) string {
-	if explicit != "" {
-		return strings.ToLower(explicit)
-	}
-	ua := strings.ToLower(userAgent)
-	switch {
-	case strings.Contains(ua, "android"):
-		return string(hub.PlatformAndroid)
-	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad"):
-		return string(hub.PlatformIOS)
-	case strings.Contains(ua, "windows"):
-		return string(hub.PlatformWindows)
-	case strings.Contains(ua, "mac os") || strings.Contains(ua, "macintosh"):
-		return string(hub.PlatformMacOS)
-	case strings.Contains(ua, "linux"):
-		return string(hub.PlatformLinux)
-	default:
-		return string(hub.PlatformUnknown)
-	}
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +313,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := strings.TrimPrefix(r.URL.Path, "/api/files/")
-	if id == "" || strings.Contains(id, "/") {
+	if id == "" || strings.Contains(id, "/") || !isHexFileID(id) {
 		http.NotFound(w, r)
 		return
 	}
@@ -348,4 +350,16 @@ func randomID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func isHexFileID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

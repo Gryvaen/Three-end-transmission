@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"three-end-transmission/internal/config"
 	"three-end-transmission/internal/hub"
 	"three-end-transmission/internal/mdns"
 )
@@ -161,19 +162,14 @@ func (c *Client) Info() ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func DefaultHost() string {
-	return os.Getenv("LANROOM_HOST")
-}
-
 func hubSupportsSend(baseURL string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Post(baseURL+"/api/send", "application/json", strings.NewReader("{}"))
+	resp, err := client.Get(baseURL + "/api/info")
 	if err != nil {
 		return false
 	}
 	_ = resp.Body.Close()
-	// 404 表示旧版 Hub，没有 CLI 接口
-	return resp.StatusCode != http.StatusNotFound
+	return resp.StatusCode == http.StatusOK
 }
 
 func discoverWorkingHub() (string, error) {
@@ -186,7 +182,7 @@ func discoverWorkingHub() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("发现了 Hub 但不支持命令行发送（请重启最新版 go run . -port 8787）")
+	return "", fmt.Errorf("发现了 Hub 但不支持命令行发送（请重启最新版 go run . -port %d", config.DefaultPort)
 }
 
 // ResolveHost 确定 Hub 地址：-host > LANROOM_HOST > mDNS 发现 > 127.0.0.1
@@ -201,10 +197,10 @@ func ResolveHost(explicit string) (string, error) {
 		if url, err := discoverWorkingHub(); err == nil {
 			return ParseHost(url)
 		}
-		if hubSupportsSend("http://127.0.0.1:8787") {
-			return ParseHost("http://127.0.0.1:8787")
+		if hubSupportsSend(fmt.Sprintf("http://127.0.0.1:%d", config.DefaultPort)) {
+			return ParseHost(fmt.Sprintf("http://127.0.0.1:%d", config.DefaultPort))
 		}
-		return "", fmt.Errorf("未找到可用 Hub，请设置 LANROOM_HOST=http://127.0.0.1:8787")
+		return "", fmt.Errorf("未找到可用 Hub，请设置 LANROOM_HOST=http://127.0.0.1:%d", config.DefaultPort)
 	case strings.EqualFold(env, "auto"):
 		url, err := discoverWorkingHub()
 		if err != nil {

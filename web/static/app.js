@@ -4,6 +4,7 @@
  */
 
 const STORAGE_KEY = "lanroom-device-name";
+const FILE_ID_RE = /^[a-f0-9]{32}$/;
 
 const platformIcons = {
   android: "🤖",
@@ -18,21 +19,24 @@ const platformIcons = {
 const platformUI = {
   android: {
     badge: "Android 版",
-    subtitle: "Material 风格 · 点击 👥 查看在线设备",
+    subtitle: "Material 风格",
+    defaultName: "Android 设备",
     namePlaceholder: "例如：小明的手机",
     composerPlaceholder: "发消息…",
     themeColor: "#111b21",
   },
   ios: {
     badge: "iOS 版",
-    subtitle: "轻触即用 · 支持添加到主屏幕",
+    subtitle: "轻触即用",
+    defaultName: "iPhone / iPad",
     namePlaceholder: "例如：iPhone",
     composerPlaceholder: "iMessage…",
     themeColor: "#000000",
   },
   windows: {
     badge: "Windows 版",
-    subtitle: "Fluent 风格 · 左侧查看在线设备",
+    subtitle: "Fluent 风格",
+    defaultName: "Windows PC",
     namePlaceholder: "例如：DESKTOP-PC",
     composerPlaceholder: "输入消息…",
     themeColor: "#202020",
@@ -40,13 +44,15 @@ const platformUI = {
   linux: {
     badge: "Linux 版",
     subtitle: "GNOME 风格 · 文件可用 lanroom-cli 发送",
+    defaultName: "Linux 设备",
     namePlaceholder: "例如：arch-pc",
     composerPlaceholder: "输入消息…",
     themeColor: "#241f31",
   },
   macos: {
     badge: "macOS 版",
-    subtitle: "桌面风格 · 左侧查看在线设备",
+    subtitle: "桌面风格",
+    defaultName: "Mac",
     namePlaceholder: "例如：MacBook",
     composerPlaceholder: "输入消息…",
     themeColor: "#1e1e1e",
@@ -54,6 +60,7 @@ const platformUI = {
   unknown: {
     badge: "网页版",
     subtitle: "局域网聊天式互传 · 浏览器打开即用",
+    defaultName: "我的设备",
     namePlaceholder: "例如：我的设备",
     composerPlaceholder: "输入消息…",
     themeColor: "#0f1419",
@@ -89,9 +96,10 @@ const els = {
 };
 
 let ws = null;
-let selfDevice = null; // 服务端分配的 device.id，用于区分自己发的消息
+let selfDevice = null;
+let chatName = null;
 let reconnectTimer = null;
-let preferredURL = null; // 二维码使用的加入地址
+let preferredURL = null;
 
 // --- 工具函数 ---
 
@@ -110,14 +118,22 @@ function isIOSChrome() {
   return /CriOS/i.test(navigator.userAgent);
 }
 
-/** Android：动态计算输入栏高度与键盘偏移，避免被挡住 */
-function initAndroidViewportFix() {
-  if (detectPlatform() !== "android") return;
+/** 移动端：动态计算输入栏高度与键盘偏移 */
+let mobileViewportInited = false;
+
+function initMobileViewportFix() {
+  const platform = detectPlatform();
+  if (platform !== "android" && platform !== "ios") return;
+  if (mobileViewportInited) return;
 
   const composer = document.querySelector(".composer");
   if (!composer) return;
 
+  mobileViewportInited = true;
+
   const update = () => {
+    if (!document.body.classList.contains("in-chat")) return;
+
     const h = composer.getBoundingClientRect().height;
     document.documentElement.style.setProperty("--composer-offset", `${Math.ceil(h + 12)}px`);
 
@@ -139,6 +155,25 @@ function initAndroidViewportFix() {
   if (typeof ResizeObserver !== "undefined") {
     new ResizeObserver(update).observe(composer);
   }
+}
+
+/** 滚动时才显示滚动条（Linux / Windows 避免常驻白边） */
+function initAutoHideScrollbars() {
+  const selectors = ".messages, #device-list";
+  const hideDelay = 900;
+
+  document.querySelectorAll(selectors).forEach((el) => {
+    let timer = null;
+
+    const show = () => {
+      el.classList.add("is-scrolling");
+      clearTimeout(timer);
+      timer = setTimeout(() => el.classList.remove("is-scrolling"), hideDelay);
+    };
+
+    el.addEventListener("scroll", show, { passive: true });
+    el.addEventListener("wheel", show, { passive: true });
+  });
 }
 
 /** 按平台应用主题、文案与布局（html[data-platform]） */
@@ -200,15 +235,16 @@ function setDevicesPanel(open) {
 
 function defaultDeviceName() {
   const platform = detectPlatform();
-  const labels = {
-    android: "Android 设备",
-    windows: "Windows PC",
-    linux: "Linux 设备",
-    ios: "iPhone / iPad",
-    macos: "Mac",
-    unknown: "我的设备",
-  };
-  return labels[platform] || labels.unknown;
+  return (platformUI[platform] || platformUI.unknown).defaultName;
+}
+
+function isInChat() {
+  return document.body.classList.contains("in-chat");
+}
+
+function safeFileURL(fileId) {
+  if (!fileId || !FILE_ID_RE.test(fileId)) return null;
+  return `/api/files/${fileId}`;
 }
 
 function formatTime(ts) {
@@ -250,14 +286,17 @@ function renderDevices(users) {
 
     const ip = user.ip || "未知";
 
+    const platformKey = String(user.platform || "unknown");
+    const icon = platformIcons[platformKey] || platformIcons.unknown;
+
     const li = document.createElement("li");
     li.className = "device-item";
     li.innerHTML = `
-      <span class="device-icon">${platformIcons[user.platform] || platformIcons.unknown}</span>
+      <span class="device-icon">${icon}</span>
       <div>
         <div class="device-name">${escapeHTML(displayName)}</div>
         <div class="device-ip">${escapeHTML(ip)}</div>
-        <div class="device-platform">${escapeHTML(user.platform)}</div>
+        <div class="device-platform">${escapeHTML(platformKey)}</div>
       </div>
     `;
     els.deviceList.appendChild(li);
@@ -298,9 +337,10 @@ function appendMessage(msg, isSelf) {
   if (payload.kind === "text") {
     body = `<div class="msg-bubble">${escapeHTML(payload.content || "")}</div>`;
   } else if (payload.kind === "image") {
-    // 图片先经 /api/upload 存盘，聊天里只传 fileId
-    const src = payload.fileId ? `/api/files/${payload.fileId}` : payload.content;
-    body = `<img class="msg-image" src="${src}" alt="图片" />`;
+    const imgUrl = safeFileURL(payload.fileId);
+    body = imgUrl
+      ? `<img class="msg-image" src="${escapeAttr(imgUrl)}" alt="图片" />`
+      : `<div class="msg-bubble">[图片不可用]</div>`;
   } else if (payload.kind === "file") {
     const name = payload.meta?.name || "文件";
     const size = payload.meta?.size ? formatSize(payload.meta.size) : "";
@@ -331,9 +371,10 @@ function appendMessage(msg, isSelf) {
 
 /** 通过 fetch + Blob 下载（Linux/dwm 下比 <a download> 可靠） */
 async function downloadFile(fileId, fileName) {
-  if (!fileId) return;
+  const url = safeFileURL(fileId);
+  if (!url) return;
   try {
-    const resp = await fetch(`/api/files/${fileId}`);
+    const resp = await fetch(url);
     if (!resp.ok) {
       alert("下载失败，文件可能已过期");
       return;
@@ -358,7 +399,9 @@ async function downloadFile(fileId, fileName) {
 /** 建立 WebSocket；断线后在聊天页内自动重连 */
 function connect(name) {
   if (ws) {
+    ws.onclose = null;
     ws.close();
+    ws = null;
   }
 
   const platform = detectPlatform();
@@ -376,9 +419,11 @@ function connect(name) {
 
   ws.onclose = () => {
     setConnected(false);
-    // 已离开聊天页则不再重连
-    if (els.chatScreen.classList.contains("hidden")) return;
-    reconnectTimer = setTimeout(() => connect(name), 2000);
+    ws = null;
+    if (!isInChat() || !chatName) return;
+    reconnectTimer = setTimeout(() => {
+      if (isInChat() && chatName) connect(chatName);
+    }, 2000);
   };
 
   ws.onerror = () => {
@@ -498,7 +543,7 @@ async function showInfoDialog() {
   items.forEach((item) => {
     const div = document.createElement("div");
     div.className = "url-item";
-    div.innerHTML = `<strong>${item.label}</strong>${item.url}`;
+    div.innerHTML = `<strong>${escapeHTML(item.label)}</strong>${escapeHTML(item.url)}`;
     els.urlList.appendChild(div);
   });
 
@@ -511,19 +556,32 @@ async function showInfoDialog() {
 // --- 页面流程 ---
 
 function enterChat(name) {
+  chatName = name;
   localStorage.setItem(STORAGE_KEY, name);
   document.body.classList.add("in-chat");
   els.joinScreen.classList.add("hidden");
   els.chatScreen.classList.remove("hidden");
   els.selfLabel.textContent = `当前身份：${name}`;
   setDevicesPanel(false);
-  initAndroidViewportFix();
+  initMobileViewportFix();
   connect(name);
 }
 
 function leaveChat() {
-  if (ws) ws.close();
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+    ws = null;
+  }
+  chatName = null;
+  selfDevice = null;
   document.body.classList.remove("in-chat");
+  document.documentElement.style.removeProperty("--composer-offset");
+  document.documentElement.style.removeProperty("--keyboard-offset");
   setDevicesPanel(false);
   els.chatScreen.classList.add("hidden");
   els.joinScreen.classList.remove("hidden");
@@ -574,6 +632,7 @@ els.fileInput.addEventListener("change", async () => {
 // --- 初始化 ---
 
 initPlatformUI();
+initAutoHideScrollbars();
 
 const savedName = localStorage.getItem(STORAGE_KEY);
 els.deviceName.value = savedName || defaultDeviceName();

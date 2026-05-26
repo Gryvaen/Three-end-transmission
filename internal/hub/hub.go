@@ -11,11 +11,10 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 512 * 1024
-
+	writeWait       = 10 * time.Second
+	pongWait        = 60 * time.Second
+	pingPeriod      = (pongWait * 9) / 10
+	MaxMessageSize  = 512 * 1024
 	DefaultHistoryTTL = 10 * time.Minute
 )
 
@@ -76,12 +75,6 @@ func New() *Hub {
 		clients:    make(map[*Client]bool),
 		history:    make([]ChatMessage, 0, 64),
 		historyTTL: DefaultHistoryTTL,
-	}
-}
-
-func (h *Hub) Run() {
-	for {
-		select {}
 	}
 }
 
@@ -246,7 +239,7 @@ func (c *Client) ReadPump() {
 		_ = c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadLimit(MaxMessageSize)
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		return c.conn.SetReadDeadline(time.Now().Add(pongWait))

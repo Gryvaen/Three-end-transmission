@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"three-end-transmission/internal/config"
+
 	"github.com/grandcat/zeroconf"
 )
 
@@ -45,7 +47,7 @@ func DiscoverAll(timeout time.Duration) ([]string, error) {
 			}
 			port := entry.Port
 			if port == 0 {
-				port = 8787
+				port = config.DefaultPort
 			}
 			url := fmt.Sprintf("http://%s:%d", ip, port)
 			if _, ok := seen[url]; ok {
@@ -77,10 +79,10 @@ func Discover(timeout time.Duration) (string, error) {
 func preferURL(a, b string) bool {
 	pa := portFromURL(a)
 	pb := portFromURL(b)
-	if pa == 8787 && pb != 8787 {
+	if pa == config.DefaultPort && pb != config.DefaultPort {
 		return true
 	}
-	if pb == 8787 && pa != 8787 {
+	if pb == config.DefaultPort && pa != config.DefaultPort {
 		return false
 	}
 	return pa < pb
@@ -89,12 +91,12 @@ func preferURL(a, b string) bool {
 func portFromURL(raw string) int {
 	_, portStr, err := net.SplitHostPort(strings.TrimPrefix(raw, "http://"))
 	if err != nil {
-		return 8787
+		return config.DefaultPort
 	}
 	var port int
 	fmt.Sscanf(portStr, "%d", &port)
 	if port == 0 {
-		return 8787
+		return config.DefaultPort
 	}
 	return port
 }

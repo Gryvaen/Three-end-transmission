@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-func LocalIPv4Addresses() []string {
-	return collectIPv4(false)
-}
-
 func LANIPv4Addresses() []string {
 	return collectIPv4(true)
 }

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"three-end-transmission/internal/config"
 	"three-end-transmission/internal/mdns"
 	"three-end-transmission/internal/server"
 )
@@ -19,7 +20,7 @@ import (
 var webFS embed.FS
 
 func main() {
-	port := flag.Int("port", 8787, "HTTP listen port")
+	port := flag.Int("port", config.DefaultPort, "HTTP listen port")
 	flag.Parse()
 
 	static, err := fs.Sub(webFS, "web")
@@ -38,6 +39,7 @@ func main() {
 		StaticFS: http.FS(static),
 		Mdns:     reg,
 	})
+	srv.StartFileCleanup()
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *port),
