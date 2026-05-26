@@ -16,41 +16,64 @@
   --scrollbar-size: 5px;
   --scrollbar-thumb: rgba(148, 163, 184, 0.45);
   --scrollbar-thumb-active: rgba(148, 163, 184, 0.72);
+  --input-scrollbar-size: 4px;
+  --input-scrollbar-thumb: color-mix(in srgb, var(--accent) 42%, transparent);
+  --input-scrollbar-thumb-active: color-mix(in srgb, var(--accent) 62%, transparent);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html {
+  background: var(--bg);
+  overflow-x: hidden;
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* 可滚动区域：默认隐藏，滚动时淡入（见 app.js .is-scrolling） */
-.messages,
-#device-list {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+/* 聊天消息区：永久隐藏原生滚动条（Linux GTK 白边） */
+.no-scrollbar,
+.messages {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.messages.is-scrolling,
+.no-scrollbar::-webkit-scrollbar,
+.messages::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+/* 设备列表：滚动时淡入细条 */
+#device-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 #device-list.is-scrolling {
+  scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-.messages::-webkit-scrollbar,
 #device-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+#device-list.is-scrolling::-webkit-scrollbar {
   width: var(--scrollbar-size);
   height: var(--scrollbar-size);
 }
 
-.messages::-webkit-scrollbar-button,
 #device-list::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.messages::-webkit-scrollbar-track,
-.messages::-webkit-scrollbar-track-piece,
-.messages::-webkit-scrollbar-corner,
 #device-list::-webkit-scrollbar-track,
 #device-list::-webkit-scrollbar-track-piece,
 #device-list::-webkit-scrollbar-corner {
@@ -58,23 +81,67 @@
   border: none;
 }
 
-.messages::-webkit-scrollbar-thumb,
-#device-list::-webkit-scrollbar-thumb {
-  background-color: transparent;
+#device-list.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
   border: none;
   border-radius: 999px;
-  box-shadow: none;
   transition: background-color 0.35s ease;
 }
 
-.messages.is-scrolling::-webkit-scrollbar-thumb,
-#device-list.is-scrolling::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
+/* 输入框：默认隐藏，滚动/聚焦时显示精致细条 */
+#message-input {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.messages.is-scrolling::-webkit-scrollbar-thumb:hover,
-#device-list.is-scrolling::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-active);
+#message-input.is-scrolling,
+#message-input:focus-visible {
+  scrollbar-width: thin;
+  scrollbar-color: var(--input-scrollbar-thumb) transparent;
+}
+
+#message-input::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+#message-input.is-scrolling::-webkit-scrollbar,
+#message-input:focus-visible::-webkit-scrollbar {
+  width: var(--input-scrollbar-size);
+}
+
+#message-input::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+#message-input::-webkit-scrollbar-track,
+#message-input::-webkit-scrollbar-track-piece,
+#message-input::-webkit-scrollbar-corner {
+  background: transparent;
+  border: none;
+}
+
+#message-input.is-scrolling::-webkit-scrollbar-thumb,
+#message-input:focus-visible::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    var(--input-scrollbar-thumb-active),
+    var(--input-scrollbar-thumb)
+  );
+  border: none;
+  border-radius: 999px;
+  min-height: 28px;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+#message-input.is-scrolling::-webkit-scrollbar-thumb:hover,
+#message-input:focus-visible::-webkit-scrollbar-thumb:hover {
+  background: var(--input-scrollbar-thumb-active);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 body {
@@ -82,6 +149,17 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+}
+
+body.in-chat {
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+}
+
+html.in-chat {
+  overflow: hidden;
+  height: 100%;
 }
 
 .hidden {
@@ -194,7 +272,11 @@ button:disabled {
 #chat-screen {
   display: grid;
   grid-template-columns: 280px 1fr;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -291,6 +373,7 @@ button:disabled {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .chat-header {
@@ -354,6 +437,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  background: var(--bg);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -435,6 +519,16 @@ button:disabled {
   resize: none;
   min-height: 44px;
   max-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  line-height: 1.45;
+  padding-right: 10px;
+  transition: padding-right 0.2s ease;
+}
+
+#message-input.is-scrolling,
+#message-input:focus-visible {
+  padding-right: 14px;
 }
 
 #send-btn {

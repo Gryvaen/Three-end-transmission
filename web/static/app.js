@@ -157,10 +157,10 @@ function initMobileViewportFix() {
   }
 }
 
-/** 滚动时才显示滚动条（Linux / Windows 避免常驻白边） */
+/** 滚动时才显示滚动条（设备列表、输入框） */
 function initAutoHideScrollbars() {
-  const selectors = ".messages, #device-list";
   const hideDelay = 900;
+  const selectors = "#device-list, #message-input";
 
   document.querySelectorAll(selectors).forEach((el) => {
     let timer = null;
@@ -559,6 +559,7 @@ function enterChat(name) {
   chatName = name;
   localStorage.setItem(STORAGE_KEY, name);
   document.body.classList.add("in-chat");
+  document.documentElement.classList.add("in-chat");
   els.joinScreen.classList.add("hidden");
   els.chatScreen.classList.remove("hidden");
   els.selfLabel.textContent = `当前身份：${name}`;
@@ -580,6 +581,7 @@ function leaveChat() {
   chatName = null;
   selfDevice = null;
   document.body.classList.remove("in-chat");
+  document.documentElement.classList.remove("in-chat");
   document.documentElement.style.removeProperty("--composer-offset");
   document.documentElement.style.removeProperty("--keyboard-offset");
   setDevicesPanel(false);
