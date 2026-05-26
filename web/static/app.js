@@ -245,16 +245,18 @@ async function showInfoDialog() {
   els.urlList.innerHTML = "";
 
   const items = [];
-  if (info.mdnsUrl) {
-    items.push({ label: "mDNS（IP 变化时优先用这个）", url: info.mdnsUrl });
-  }
+  const joinUrl = info.joinUrl || "";
+
   (info.urls || []).forEach((url) => {
-    if (url !== info.mdnsUrl) {
-      items.push({ label: "局域网 IP", url });
-    }
+    const isMdns = url.endsWith(".local:" + info.port);
+    const isJoin = url === joinUrl;
+    let label = "局域网 IP";
+    if (isJoin) label = "推荐（二维码 / Android）";
+    else if (isMdns) label = "mDNS（部分 Android 不可用）";
+    items.push({ label, url });
   });
 
-  preferredURL = info.joinUrl || items[0]?.url || location.href;
+  preferredURL = joinUrl || items[0]?.url || location.href;
 
   items.forEach((item) => {
     const div = document.createElement("div");

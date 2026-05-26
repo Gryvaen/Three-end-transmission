@@ -156,6 +156,14 @@ ws://<host>:8787/ws?name=设备名&platform=android
 
 ## 常见问题
 
+### 手机扫码后打不开？
+
+- 二维码现在优先使用 **局域网 IP**（如 `http://192.168.x.x:8787`），不要用 `.local` 地址
+- 确认手机和 Hub **在同一 WiFi**（不是手机流量）
+- 路由器关闭 **AP 隔离 / 访客网络隔离**
+- Linux 防火墙放行 8787：`sudo firewall-cmd --add-port=8787/tcp` 或 `sudo ufw allow 8787`
+- 若仍不行，在 Hub 机器上执行 `ss -tlnp | grep 8787` 确认服务在监听
+
 ### 手机搜不到 `.local` 地址？
 
 - 确认手机和 Hub 在 **同一 WiFi**

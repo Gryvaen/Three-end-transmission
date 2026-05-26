@@ -89,28 +89,30 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) joinURLs() []string {
-	ips := LocalIPv4Addresses()
-	urls := make([]string, 0, len(ips)+1)
+	urls := make([]string, 0)
 
+	for _, ip := range LANIPv4Addresses() {
+		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.cfg.Port))
+	}
 	if s.cfg.Mdns != nil {
 		urls = append(urls, s.cfg.Mdns.URL())
-	}
-	for _, ip := range ips {
-		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.cfg.Port))
 	}
 	return urls
 }
 
 func (s *Server) preferredJoinURL() string {
-	urls := s.joinURLs()
-	if len(urls) == 0 {
-		return ""
+	lanIPs := LANIPv4Addresses()
+	if len(lanIPs) > 0 {
+		return fmt.Sprintf("http://%s:%d", lanIPs[0], s.cfg.Port)
 	}
-	return urls[0]
+	if s.cfg.Mdns != nil {
+		return s.cfg.Mdns.URL()
+	}
+	return ""
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	ips := LocalIPv4Addresses()
+	ips := LANIPv4Addresses()
 	urls := s.joinURLs()
 
 	resp := infoResponse{
