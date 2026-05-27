@@ -395,15 +395,15 @@ async function downloadFile(fileId, fileName) {
       return;
     }
     const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = blobUrl;
     a.download = fileName || "download";
     a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
   } catch (err) {
     alert(`下载失败：${err.message}`);
   }
