@@ -44,12 +44,6 @@ func New(baseURL, name string) *Client {
 	}
 }
 
-type sendRequest struct {
-	Name     string             `json:"name"`
-	Platform string             `json:"platform"`
-	Payload  hub.MessagePayload `json:"payload"`
-}
-
 type uploadResult struct {
 	FileID string `json:"fileId"`
 	Name   string `json:"name"`
@@ -81,13 +75,8 @@ func (c *Client) SendStream(filename string, r io.Reader) error {
 		return err
 	}
 
-	kind := "file"
-	if strings.HasPrefix(uploaded.Mime, "image/") {
-		kind = "image"
-	}
-
 	return c.send(hub.MessagePayload{
-		Kind:   kind,
+		Kind:   hub.PayloadKindForMIME(uploaded.Mime),
 		FileID: uploaded.FileID,
 		Meta: &hub.FileMeta{
 			Name: uploaded.Name,
@@ -98,7 +87,7 @@ func (c *Client) SendStream(filename string, r io.Reader) error {
 }
 
 func (c *Client) send(payload hub.MessagePayload) error {
-	body, err := json.Marshal(sendRequest{
+	body, err := json.Marshal(hub.SendRequest{
 		Name:     c.Name,
 		Platform: c.Platform,
 		Payload:  payload,
@@ -153,16 +142,7 @@ func (c *Client) upload(filename string, r io.Reader) (*uploadResult, error) {
 	return &result, nil
 }
 
-func (c *Client) Info() ([]byte, error) {
-	resp, err := c.HTTP.Get(c.BaseURL + "/api/info")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
-}
-
-func hubSupportsSend(baseURL string) bool {
+func hubReachable(baseURL string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(baseURL + "/api/info")
 	if err != nil {
@@ -178,7 +158,7 @@ func discoverWorkingHub() (string, error) {
 		return "", err
 	}
 	for _, candidate := range urls {
-		if hubSupportsSend(candidate) {
+		if hubReachable(candidate) {
 			return candidate, nil
 		}
 	}
@@ -197,7 +177,7 @@ func ResolveHost(explicit string) (string, error) {
 		if url, err := discoverWorkingHub(); err == nil {
 			return ParseHost(url)
 		}
-		if hubSupportsSend(fmt.Sprintf("http://127.0.0.1:%d", config.DefaultPort)) {
+		if hubReachable(fmt.Sprintf("http://127.0.0.1:%d", config.DefaultPort)) {
 			return ParseHost(fmt.Sprintf("http://127.0.0.1:%d", config.DefaultPort))
 		}
 		return "", fmt.Errorf("未找到可用 Hub，请设置 LANROOM_HOST=http://127.0.0.1:%d", config.DefaultPort)

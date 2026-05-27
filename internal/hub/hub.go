@@ -90,17 +90,10 @@ func (h *Hub) Register(client *Client) {
 }
 
 func (h *Hub) sendWelcome(client *Client) {
-	body, err := json.Marshal(map[string]any{
-		"type":   "welcome",
-		"device": client.device,
+	client.enqueueJSON(welcomeMessage{
+		Type:   "welcome",
+		Device: client.device,
 	})
-	if err != nil {
-		return
-	}
-	select {
-	case client.send <- body:
-	default:
-	}
 }
 
 func (h *Hub) sendHistory(client *Client) {
@@ -112,17 +105,10 @@ func (h *Hub) sendHistory(client *Client) {
 		return
 	}
 
-	body, err := json.Marshal(map[string]any{
-		"type":     "history",
-		"messages": msgs,
+	client.enqueueJSON(historyMessage{
+		Type:     "history",
+		Messages: msgs,
 	})
-	if err != nil {
-		return
-	}
-	select {
-	case client.send <- body:
-	default:
-	}
 }
 
 func (h *Hub) addToHistory(msg ChatMessage) {
@@ -169,12 +155,9 @@ func (h *Hub) devices() []Device {
 }
 
 func (h *Hub) broadcastPresence() {
-	msg := ChatMessage{
-		Type: "presence",
-	}
-	body, err := json.Marshal(map[string]any{
-		"type":  msg.Type,
-		"users": h.devices(),
+	body, err := json.Marshal(presenceMessage{
+		Type:  "presence",
+		Users: h.devices(),
 	})
 	if err != nil {
 		return
@@ -230,6 +213,17 @@ func NewClient(h *Hub, conn *websocket.Conn, name string, platform Platform, ip 
 			Platform: platform,
 			IP:       ip,
 		},
+	}
+}
+
+func (c *Client) enqueueJSON(v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- body:
+	default:
 	}
 }
 

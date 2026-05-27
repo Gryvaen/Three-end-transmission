@@ -92,14 +92,17 @@ const els = {
   infoDialog: document.getElementById("info-dialog"),
   closeInfoBtn: document.getElementById("close-info-btn"),
   urlList: document.getElementById("url-list"),
-  qrImage: document.getElementById("qr-image"),
+  qrAndroid: document.getElementById("qr-android"),
+  qrIos: document.getElementById("qr-ios"),
+  qrIosCard: document.getElementById("qr-ios-card"),
+  qrAndroidUrl: document.getElementById("qr-android-url"),
+  qrIosUrl: document.getElementById("qr-ios-url"),
 };
 
 let ws = null;
 let selfDevice = null;
 let chatName = null;
 let reconnectTimer = null;
-let preferredURL = null;
 
 // --- 工具函数 ---
 
@@ -176,6 +179,16 @@ function initAutoHideScrollbars() {
   });
 }
 
+function addJoinHint(id, text) {
+  const card = document.querySelector(".join-card");
+  if (!card || document.getElementById(id)) return;
+  const hint = document.createElement("p");
+  hint.id = id;
+  hint.className = "browser-hint";
+  hint.textContent = text;
+  card.insertBefore(hint, card.querySelector(".subtitle"));
+}
+
 /** 按平台应用主题、文案与布局（html[data-platform]） */
 function initPlatformUI() {
   const platform = detectPlatform();
@@ -210,15 +223,17 @@ function initPlatformUI() {
   }
 
   if (isIOSChrome()) {
-    const card = document.querySelector(".join-card");
-    if (card && !document.getElementById("ios-chrome-hint")) {
-      const hint = document.createElement("p");
-      hint.id = "ios-chrome-hint";
-      hint.className = "browser-hint";
-      hint.textContent =
-        "iOS 的 Chrome 常无法打开 .local 地址。请改用 Safari，或在地址栏输入局域网 IP（如 http://192.168.x.x:8787）。";
-      card.insertBefore(hint, card.querySelector(".subtitle"));
-    }
+    addJoinHint(
+      "ios-chrome-hint",
+      "iOS 的 Chrome 常无法打开 .local 地址。请改用 Safari，或在地址栏输入局域网 IP（如 http://192.168.x.x:8787）。"
+    );
+  }
+
+  if (platform === "android") {
+    addJoinHint(
+      "android-mdns-hint",
+      "Android 无法解析 .local 域名（如 myarch.local）。请扫电脑 Hub 页「连接信息」里的 IP 二维码，或手动输入 http://192.168.x.x:8787。"
+    );
   }
 }
 
@@ -492,10 +507,9 @@ async function uploadAndSend(file) {
   }
 
   const result = await resp.json();
-  const isImage = file.type.startsWith("image/");
 
   sendWS({
-    kind: isImage ? "image" : "file",
+    kind: result.mime?.startsWith("image/") ? "image" : "file",
     fileId: result.fileId,
     meta: {
       name: result.name,
@@ -514,8 +528,57 @@ async function loadConnectionInfo() {
 }
 
 /**
- * 展示加入地址列表与二维码。
- * 二维码优先使用 joinUrl（局域网 IP），Android 无法解析 .local 域名。
+ * 是否为局域网 IPv4 地址（适合手机扫码 / 二维码）。
+ */
+function isLANIPv4Origin(origin) {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return (
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isMdnsURL(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().endsWith(".local");
+  } catch {
+    return String(url).includes(".local");
+  }
+}
+
+function firstIPv4JoinURL(info) {
+  if (info.joinUrl && !isMdnsURL(info.joinUrl)) return info.joinUrl;
+  for (const url of info.urls || []) {
+    if (!isMdnsURL(url)) return url;
+  }
+  return "";
+}
+
+function firstMdnsJoinURL(info) {
+  if (info.mdnsUrl) return info.mdnsUrl;
+  if (info.joinUrl && isMdnsURL(info.joinUrl)) return info.joinUrl;
+  for (const url of info.urls || []) {
+    if (isMdnsURL(url)) return url;
+  }
+  return "";
+}
+
+/** Android 二维码：局域网 IPv4 */
+function pickAndroidJoinURL(info) {
+  if (isLANIPv4Origin(location.origin)) {
+    return location.origin;
+  }
+  const ipv4 = firstIPv4JoinURL(info);
+  if (ipv4) return ipv4;
+  return info.joinUrl || location.href;
+}
+
+/**
+ * 展示加入地址列表与双二维码（Android IPv4 / iOS .local）。
  */
 async function showInfoDialog() {
   const info = await loadConnectionInfo();
@@ -526,19 +589,21 @@ async function showInfoDialog() {
 
   els.urlList.innerHTML = "";
 
+  const androidUrl = pickAndroidJoinURL(info);
+  const iosUrl = firstMdnsJoinURL(info);
+  const ts = Date.now();
+
   const items = [];
-  const joinUrl = info.joinUrl || "";
 
   (info.urls || []).forEach((url) => {
-    const isMdns = url.endsWith(".local:" + info.port);
-    const isJoin = url === joinUrl;
+    const isMdns = isMdnsURL(url);
     let label = "局域网 IP";
-    if (isJoin) label = "推荐（二维码 / Android）";
-    else if (isMdns) label = "mDNS（部分 Android 不可用）";
+    if (url === androidUrl) label = "Android 二维码";
+    else if (url === iosUrl) label = "iOS 二维码";
+    else if (isMdns) label = "mDNS（iOS / 电脑）";
+    if (items.some((i) => i.url === url)) return;
     items.push({ label, url });
   });
-
-  preferredURL = joinUrl || items[0]?.url || location.href;
 
   items.forEach((item) => {
     const div = document.createElement("div");
@@ -547,8 +612,22 @@ async function showInfoDialog() {
     els.urlList.appendChild(div);
   });
 
-  // 加时间戳避免浏览器缓存旧二维码
-  els.qrImage.src = `/api/qrcode?url=${encodeURIComponent(preferredURL)}&t=${Date.now()}`;
+  if (els.qrAndroid && androidUrl) {
+    els.qrAndroid.src = `/api/qrcode?url=${encodeURIComponent(androidUrl)}&t=${ts}&tag=android`;
+    if (els.qrAndroidUrl) els.qrAndroidUrl.textContent = androidUrl;
+  }
+
+  if (els.qrIosCard && els.qrIos) {
+    if (iosUrl) {
+      els.qrIosCard.classList.remove("hidden");
+      els.qrIos.src = `/api/qrcode?url=${encodeURIComponent(iosUrl)}&t=${ts}&tag=ios`;
+      if (els.qrIosUrl) els.qrIosUrl.textContent = iosUrl;
+    } else {
+      els.qrIosCard.classList.add("hidden");
+      els.qrIos.removeAttribute("src");
+      if (els.qrIosUrl) els.qrIosUrl.textContent = "";
+    }
+  }
 
   els.infoDialog.showModal();
 }

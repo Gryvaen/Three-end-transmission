@@ -13,7 +13,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-// Discover 在局域网搜索 LanRoom Hub，返回全部候选 HTTP 地址（去重）。
+// DiscoverAll 在局域网搜索 LanRoom Hub，返回全部候选 HTTP 地址（去重）。
 func DiscoverAll(timeout time.Duration) ([]string, error) {
 	if timeout <= 0 {
 		timeout = 3 * time.Second
@@ -65,15 +65,6 @@ func DiscoverAll(timeout time.Duration) ([]string, error) {
 			return urls, nil
 		}
 	}
-}
-
-// Discover 返回排序后的第一个候选地址（兼容旧调用）。
-func Discover(timeout time.Duration) (string, error) {
-	urls, err := DiscoverAll(timeout)
-	if err != nil {
-		return "", err
-	}
-	return urls[0], nil
 }
 
 func preferURL(a, b string) bool {

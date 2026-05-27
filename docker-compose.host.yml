@@ -13,6 +13,7 @@ services:
     network_mode: host
     environment:
       LANROOM_UPLOAD_DIR: /data/uploads
+      LANROOM_HOSTNAME: ${LANROOM_HOSTNAME:-myarch}
     volumes:
       - lanroom-uploads:/data/uploads
     healthcheck:

@@ -137,7 +137,7 @@ func (s *Server) preferredJoinURL(lanIPs []string) string {
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	ips := LANIPv4Addresses()
+	ips := AdvertiseIPv4Addresses(r)
 	urls := s.joinURLs(ips)
 
 	resp := infoResponse{
@@ -164,7 +164,7 @@ func (s *Server) handleQRCode(w http.ResponseWriter, r *http.Request) {
 
 	target := strings.TrimSpace(r.URL.Query().Get("url"))
 	if target == "" {
-		target = s.preferredJoinURL(LANIPv4Addresses())
+		target = s.preferredJoinURL(AdvertiseIPv4Addresses(r))
 	}
 	if target == "" {
 		http.Error(w, "no join url available", http.StatusBadRequest)
@@ -183,19 +183,13 @@ func (s *Server) handleQRCode(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(png)
 }
 
-type sendRequest struct {
-	Name     string             `json:"name"`
-	Platform string             `json:"platform"`
-	Payload  hub.MessagePayload `json:"payload"`
-}
-
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req sendRequest
+	var req hub.SendRequest
 	r.Body = http.MaxBytesReader(w, r.Body, hub.MaxMessageSize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)

@@ -15,7 +15,6 @@
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   --scrollbar-size: 5px;
   --scrollbar-thumb: rgba(148, 163, 184, 0.45);
-  --scrollbar-thumb-active: rgba(148, 163, 184, 0.72);
   --input-scrollbar-size: 4px;
   --input-scrollbar-thumb: color-mix(in srgb, var(--accent) 42%, transparent);
   --input-scrollbar-thumb-active: color-mix(in srgb, var(--accent) 62%, transparent);
@@ -32,13 +31,11 @@ html {
 }
 
 /* 聊天消息区：永久隐藏原生滚动条（Linux GTK 白边） */
-.no-scrollbar,
 .messages {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.no-scrollbar::-webkit-scrollbar,
 .messages::-webkit-scrollbar {
   display: none;
   width: 0;
@@ -585,22 +582,54 @@ button:disabled {
   margin-bottom: 4px;
 }
 
-.qr-wrap {
-  text-align: center;
+.qr-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
-#qr-image {
+.qr-card {
+  text-align: center;
+  padding: 12px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 12px;
+}
+
+.qr-platform {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.qr-image {
+  border-radius: 10px;
   background: white;
-  padding: 8px;
+  padding: 6px;
   display: inline-block;
+  max-width: 100%;
+  height: auto;
+}
+
+.qr-url {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+  line-height: 1.35;
 }
 
 .qr-caption {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 520px) {
+  .qr-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 #close-info-btn {
