@@ -705,9 +705,11 @@ els.messageInput.addEventListener("keydown", (e) => {
 // 📎 按钮触发 file input；Linux 下若无效可用 lanroom-cli
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", async () => {
-  const file = els.fileInput.files?.[0];
+  const files = [...(els.fileInput.files || [])];
   els.fileInput.value = ""; // 允许重复选择同一文件
-  if (file) await uploadAndSend(file);
+  for (const file of files) {
+    await uploadAndSend(file);
+  }
 });
 
 // --- 初始化 ---

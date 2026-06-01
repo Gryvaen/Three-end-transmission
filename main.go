@@ -29,7 +29,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	reg, err := mdns.Register(*port)
+	reg, err := mdns.Register(*port, server.AdvertiseIPv4Addresses(nil))
 	if err != nil {
 		slog.Warn("mDNS registration failed, QR/IP fallback still works", "err", err)
 	}
