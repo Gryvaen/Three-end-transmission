@@ -398,6 +398,29 @@ html[data-platform="ios"] body.in-chat .composer {
   html[data-platform="ios"] .msg {
     max-width: 88%;
   }
+
+  html[data-platform="android"] .file-card,
+  html[data-platform="ios"] .file-card {
+    min-height: 56px;
+    padding: 12px 14px;
+  }
+
+  html[data-platform="android"] .file-card .download-label,
+  html[data-platform="ios"] .file-card .download-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 6px 14px;
+    margin-top: 8px;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent);
+  }
+
+  html[data-platform="android"] .file-card:active .download-label,
+  html[data-platform="ios"] .file-card:active .download-label {
+    background: color-mix(in srgb, var(--accent) 38%, transparent);
+  }
 }
 
 /* 桌面端聊天区：强制无原生滚动条，避免 GTK 白边 */

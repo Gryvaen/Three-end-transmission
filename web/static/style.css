@@ -480,21 +480,50 @@ button:disabled {
   padding: 10px 12px;
   background: rgba(0, 0, 0, 0.15);
   border-radius: 10px;
-}
-
-.file-card .download-btn {
-  background: none;
-  border: none;
-  color: #93c5fd;
   text-decoration: none;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-  font: inherit;
+  color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(59, 130, 246, 0.25);
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.file-card .download-btn:hover {
-  text-decoration: underline;
+a.file-card:active {
+  transform: scale(0.98);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+a.file-card.is-downloading {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.file-card .file-icon {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+}
+
+.file-card .file-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.file-card .file-name {
+  word-break: break-all;
+}
+
+.file-card .file-size {
+  color: var(--muted);
+}
+
+.file-card .download-label {
+  display: inline-block;
+  margin-top: 6px;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.file-card.is-downloading .download-label::after {
+  content: "…";
 }
 
 .composer {

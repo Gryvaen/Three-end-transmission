@@ -360,17 +360,21 @@ function appendMessage(msg, isSelf) {
     const name = payload.meta?.name || "文件";
     const size = payload.meta?.size ? formatSize(payload.meta.size) : "";
     const safeName = escapeHTML(name);
-    body = `
+    const fileUrl = safeFileURL(payload.fileId);
+    body = fileUrl
+      ? `
       <div class="msg-bubble">
-        <div class="file-card">
-          <span>📎</span>
-          <div>
-            <div>${safeName}</div>
-            <small>${size}</small><br />
-            <button type="button" class="download-btn" data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}">下载</button>
+        <a class="file-card file-download" href="${escapeAttr(fileUrl)}" download="${escapeAttr(name)}"
+           data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}">
+          <span class="file-icon" aria-hidden="true">📎</span>
+          <div class="file-info">
+            <div class="file-name">${safeName}</div>
+            <small class="file-size">${size}</small>
+            <span class="download-label">下载</span>
           </div>
-        </div>
-      </div>`;
+        </a>
+      </div>`
+      : `<div class="msg-bubble">[文件不可用]</div>`;
   } else {
     body = `<div class="msg-bubble">[不支持的消息类型]</div>`;
   }
@@ -384,10 +388,21 @@ function appendMessage(msg, isSelf) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
+/** Linux 桌面 fetch+Blob；移动端/其他平台用原生链接，立刻有系统响应 */
+function needsBlobDownload() {
+  return document.documentElement.dataset.platform === "linux";
+}
+
 /** 通过 fetch + Blob 下载（Linux/dwm 下比 <a download> 可靠） */
-async function downloadFile(fileId, fileName) {
+async function downloadFile(fileId, fileName, triggerEl) {
   const url = safeFileURL(fileId);
   if (!url) return;
+
+  if (triggerEl) {
+    triggerEl.classList.add("is-downloading");
+    triggerEl.setAttribute("aria-busy", "true");
+  }
+
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
@@ -406,6 +421,11 @@ async function downloadFile(fileId, fileName) {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
   } catch (err) {
     alert(`下载失败：${err.message}`);
+  } finally {
+    if (triggerEl) {
+      triggerEl.classList.remove("is-downloading");
+      triggerEl.removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -687,10 +707,11 @@ els.toggleDevicesBtn?.addEventListener("click", () => {
 els.sidebarBackdrop?.addEventListener("click", () => setDevicesPanel(false));
 
 els.messages.addEventListener("click", (e) => {
-  const btn = e.target.closest(".download-btn");
-  if (!btn) return;
+  const link = e.target.closest(".file-download");
+  if (!link || link.classList.contains("is-downloading")) return;
+  if (!needsBlobDownload()) return; // 移动端：交给原生 <a download>，立即响应
   e.preventDefault();
-  downloadFile(btn.dataset.fileId, btn.dataset.fileName);
+  downloadFile(link.dataset.fileId, link.dataset.fileName, link);
 });
 
 els.sendBtn.addEventListener("click", sendText);
