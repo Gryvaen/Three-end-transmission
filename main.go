@@ -29,20 +29,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	reg, err := mdns.Register(*port, server.AdvertiseIPv4Addresses(nil))
-	if err != nil {
-		slog.Warn("mDNS registration failed, QR/IP fallback still works", "err", err)
-	}
-
 	uploadDir := os.Getenv("LANROOM_UPLOAD_DIR")
 
 	srv := server.New(server.Config{
 		Port:      *port,
 		StaticFS:  http.FS(static),
-		Mdns:      reg,
+		Mdns:      nil,
 		UploadDir: uploadDir,
 	})
 	srv.StartFileCleanup()
+
+	keeper := mdns.NewKeeper(*port, func() []string {
+		return server.AdvertiseIPv4Addresses(nil)
+	})
+	go keeper.Run(srv.SetMdns)
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *port),
@@ -51,9 +51,6 @@ func main() {
 
 	go func() {
 		slog.Info("hub started", "addr", httpServer.Addr)
-		if reg != nil {
-			slog.Info("open in browser", "mdns", reg.URL())
-		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server stopped", "err", err)
 			os.Exit(1)
@@ -64,8 +61,6 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	if reg != nil {
-		reg.Shutdown()
-	}
+	keeper.Shutdown()
 	_ = httpServer.Close()
 }

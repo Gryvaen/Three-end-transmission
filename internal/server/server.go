@@ -32,9 +32,27 @@ type Config struct {
 
 type Server struct {
 	cfg      Config
+	mu       sync.RWMutex
 	hub      *hub.Hub
 	upgrader websocket.Upgrader
 	files    sync.Map
+}
+
+// SetMdns 在启动后补注册 mDNS 时更新（例如 Wi-Fi 晚于容器就绪）。
+func (s *Server) SetMdns(reg *mdns.Registration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg.Mdns = reg
+}
+
+func (s *Server) MdnsRegistered() bool {
+	return s.mdnsReg() != nil
+}
+
+func (s *Server) mdnsReg() *mdns.Registration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.Mdns
 }
 
 type fileRecord struct {
@@ -120,8 +138,8 @@ func (s *Server) joinURLs(lanIPs []string) []string {
 	for _, ip := range lanIPs {
 		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.cfg.Port))
 	}
-	if s.cfg.Mdns != nil {
-		urls = append(urls, s.cfg.Mdns.URL())
+	if s.mdnsReg() != nil {
+		urls = append(urls, s.mdnsReg().URL())
 	}
 	return urls
 }
@@ -130,8 +148,8 @@ func (s *Server) preferredJoinURL(lanIPs []string) string {
 	if len(lanIPs) > 0 {
 		return fmt.Sprintf("http://%s:%d", lanIPs[0], s.cfg.Port)
 	}
-	if s.cfg.Mdns != nil {
-		return s.cfg.Mdns.URL()
+	if s.mdnsReg() != nil {
+		return s.mdnsReg().URL()
 	}
 	return ""
 }
@@ -147,9 +165,9 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		JoinURL:     s.preferredJoinURL(ips),
 		ClientCount: s.hub.ClientCount(),
 	}
-	if s.cfg.Mdns != nil {
-		resp.Hostname = s.cfg.Mdns.Hostname()
-		resp.MdnsURL = s.cfg.Mdns.URL()
+	if reg := s.mdnsReg(); reg != nil {
+		resp.Hostname = reg.Hostname()
+		resp.MdnsURL = reg.URL()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

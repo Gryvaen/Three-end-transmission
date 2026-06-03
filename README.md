@@ -254,6 +254,19 @@ export LANROOM_HOST=http://127.0.0.1:8787
 
 **要求：** Linux 宿主机、已装 Avahi、`docker-compose.host.yml`（Mac/Windows Docker Desktop **不支持** host 网络）。
 
+#### 一次性永久配置（推荐）
+
+在 Hub 宿主机执行（只需做一次）：
+
+```bash
+cd /path/to/Three_end_transmission
+sudo ./deploy/setup-host-mdns.sh myarch
+```
+
+脚本会：启用 `avahi-daemon`、安装 `/etc/avahi/services/lanroom.service` 备用发布、提示配置 `nss-mdns`（解析 `*.local`）。
+
+应用内另有 **mDNS Keeper**：启动重试、Wi-Fi 晚就绪自动补注册、DHCP 换 IP 后每 90 秒自动更新。Docker 入口脚本会 **等局域网 IP 就绪** 再启动 Hub。
+
 ```bash
 cd /path/to/Three_end_transmission
 
@@ -368,6 +381,10 @@ Three_end_transmission/
 ├── Dockerfile
 ├── docker-compose.yml           # Bridge 部署
 ├── docker-compose.host.yml      # Linux host 网络 + mDNS
+├── deploy/
+│   ├── setup-host-mdns.sh       # 宿主机一次性 mDNS 配置
+│   └── avahi/lanroom.service    # Avahi 备用服务发布
+├── scripts/docker-entrypoint.sh # 等 LAN IP 就绪再启动 Hub
 ├── internal/
 │   ├── config/                  # 默认端口等常量
 │   ├── hub/                     # WebSocket Hub、协议、平台解析
@@ -548,23 +565,24 @@ Three_end_transmission/
 
 ### `myarch.local` 无法解析或时好时坏？
 
+**若已执行 `deploy/setup-host-mdns.sh` 并重建容器仍失败**，按下面排查：
+
 ```bash
 systemctl status avahi-daemon
 ping -c 1 myarch.local
 resolvectl query myarch.local   # 看解析到的是 192.168.x.x 还是 172.x
+curl -s http://127.0.0.1:8787/api/info | jq '.mdnsUrl'
 ```
 
-常见原因：
+| 现象 | 处理 |
+|------|------|
+| `mdnsUrl` 为空 | 重建容器：`LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build`；查看日志应有 `mDNS active` |
+| 解析到 `172.x` | 旧镜像；重建。或设 `LANROOM_ADVERTISE_IP=192.168.x.x` |
+| Avahi 未运行 | `sudo systemctl enable --now avahi-daemon` |
+| 开着 Meta/Clash | 关系统代理或改用 `http://192.168.x.x:8787` |
+| Arch 无法解析 | 安装 `nss-mdns`，`nsswitch.conf` 的 `hosts` 行加入 `mdns4_minimal [NOTFOUND=return]` |
 
-1. **Avahi 未运行** — `sudo systemctl enable --now avahi-daemon`
-2. **mDNS 广播了 Docker 网桥 `172.x`** — 浏览器会连错地址；需 **重建 Hub 镜像**（已修复为只广播 Wi‑Fi IP）
-3. **Meta / Clash 等代理** — `.local` 可能走虚拟网卡；可关代理或直接用 `http://192.168.x.x:8787`
-
-Host 模式 Docker 需 `LANROOM_HOSTNAME` 与预期主机名一致。仍异常时可强制：
-
-```bash
-LANROOM_ADVERTISE_IP=192.168.117.224 sudo docker compose -f docker-compose.host.yml up -d --build
-```
+Host 模式需 `LANROOM_HOSTNAME` 与 `hostname` 一致。
 
 ### Windows 其他设备连不上？
 
