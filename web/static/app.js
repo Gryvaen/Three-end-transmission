@@ -22,7 +22,7 @@ const platformUI = {
     subtitle: "Material 风格",
     defaultName: "Android 设备",
     namePlaceholder: "例如：小明的手机",
-    composerPlaceholder: "发消息…",
+    composerPlaceholder: "发消息…，可粘贴图片",
     themeColor: "#111b21",
   },
   ios: {
@@ -30,7 +30,7 @@ const platformUI = {
     subtitle: "轻触即用",
     defaultName: "iPhone / iPad",
     namePlaceholder: "例如：iPhone",
-    composerPlaceholder: "iMessage…",
+    composerPlaceholder: "iMessage…，可粘贴图片",
     themeColor: "#000000",
   },
   windows: {
@@ -38,7 +38,7 @@ const platformUI = {
     subtitle: "Fluent 风格",
     defaultName: "Windows PC",
     namePlaceholder: "例如：DESKTOP-PC",
-    composerPlaceholder: "输入消息…",
+    composerPlaceholder: "输入消息…，可粘贴图片",
     themeColor: "#202020",
   },
   linux: {
@@ -46,7 +46,7 @@ const platformUI = {
     subtitle: "GNOME 风格 · 文件可用 lanroom-cli 发送",
     defaultName: "Linux 设备",
     namePlaceholder: "例如：arch-pc",
-    composerPlaceholder: "输入消息…",
+    composerPlaceholder: "输入消息…，可粘贴图片",
     themeColor: "#241f31",
   },
   macos: {
@@ -54,7 +54,7 @@ const platformUI = {
     subtitle: "桌面风格",
     defaultName: "Mac",
     namePlaceholder: "例如：MacBook",
-    composerPlaceholder: "输入消息…",
+    composerPlaceholder: "输入消息…，可粘贴图片",
     themeColor: "#1e1e1e",
   },
   unknown: {
@@ -62,7 +62,7 @@ const platformUI = {
     subtitle: "局域网聊天式互传 · 浏览器打开即用",
     defaultName: "我的设备",
     namePlaceholder: "例如：我的设备",
-    composerPlaceholder: "输入消息…",
+    composerPlaceholder: "输入消息…，可粘贴图片",
     themeColor: "#0f1419",
   },
 };
@@ -97,12 +97,15 @@ const els = {
   qrIosCard: document.getElementById("qr-ios-card"),
   qrAndroidUrl: document.getElementById("qr-android-url"),
   qrIosUrl: document.getElementById("qr-ios-url"),
+  copyChatBtn: document.getElementById("copy-chat-btn"),
 };
 
 let ws = null;
 let selfDevice = null;
 let chatName = null;
 let reconnectTimer = null;
+/** 当前会话消息列表，用于一键复制 */
+let chatLog = [];
 
 // --- 工具函数 ---
 
@@ -335,13 +338,127 @@ function escapeAttr(str) {
     .replaceAll("'", "&#39;");
 }
 
+/** 将单条消息转为可复制的纯文本（文字 / 图片链接 / 文件名） */
+function messageCopyText(msg) {
+  const payload = msg.payload || {};
+  if (payload.kind === "text") {
+    return payload.content || "";
+  }
+  if (payload.kind === "image") {
+    const url = safeFileURL(payload.fileId);
+    return url ? `${location.origin}${url}` : "";
+  }
+  if (payload.kind === "file") {
+    return payload.meta?.name || "";
+  }
+  return "";
+}
+
+/** 单条图片：优先复制图片本身，失败则复制链接 */
+async function copyImageToClipboard(fileId) {
+  const url = safeFileURL(fileId);
+  if (!url) return false;
+
+  const link = `${location.origin}${url}`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return copyToClipboard(link);
+    const blob = await resp.blob();
+    const type = blob.type?.startsWith("image/") ? blob.type : "image/png";
+    if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+      await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+      return true;
+    }
+  } catch {
+    /* 降级为链接 */
+  }
+  return copyToClipboard(link);
+}
+
+async function copyTextOrAlert(text, emptyHint) {
+  const trimmed = text?.trim() || "";
+  if (!trimmed) {
+    alert(emptyHint || "没有可复制的文字内容");
+    return;
+  }
+  const ok = await copyToClipboard(trimmed);
+  if (!ok) alert("复制失败，请检查浏览器权限");
+  return ok;
+}
+
+async function copyToClipboard(text) {
+  if (!text?.trim()) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
+
+function flashCopyBtn(btn, ok) {
+  if (!btn) return;
+  const prev = btn.textContent;
+  btn.textContent = ok ? "已复制" : "失败";
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }, 1600);
+}
+
+async function copyAllChat() {
+  if (chatLog.length === 0) {
+    alert("暂无聊天内容可复制");
+    return;
+  }
+  const text = chatLog.map(messageCopyText).filter((line) => line.trim()).join("\n");
+  const ok = await copyTextOrAlert(text, "暂无聊天内容可复制");
+  if (ok) flashCopyBtn(els.copyChatBtn, true);
+}
+
+async function copyOneMessage(idx) {
+  const msg = chatLog[idx];
+  if (!msg) return;
+
+  const payload = msg.payload || {};
+  let ok = false;
+  if (payload.kind === "image") {
+    ok = await copyImageToClipboard(payload.fileId);
+    if (!ok) alert("图片复制失败，请检查权限或文件是否过期");
+  } else {
+    ok = await copyTextOrAlert(messageCopyText(msg), "该条没有可复制的文字内容");
+  }
+
+  if (ok) {
+    const btn = els.messages.querySelector(`.msg-copy-btn[data-msg-idx="${idx}"]`);
+    if (btn) {
+      btn.textContent = "已复制";
+      setTimeout(() => {
+        btn.textContent = "复制";
+      }, 1200);
+    }
+  }
+}
+
 /**
  * 将服务端广播的消息渲染到聊天区。
  * payload.kind: text | image | file
  */
 function appendMessage(msg, isSelf) {
+  const logIdx = chatLog.length;
+  chatLog.push(msg);
+
   const wrapper = document.createElement("div");
   wrapper.className = `msg${isSelf ? " self" : ""}`;
+  wrapper.dataset.msgIdx = String(logIdx);
 
   const fromName = msg.from?.name || "未知设备";
   const time = formatTime(msg.timestamp || Math.floor(Date.now() / 1000));
@@ -380,7 +497,10 @@ function appendMessage(msg, isSelf) {
   }
 
   wrapper.innerHTML = `
-    <div class="msg-meta">${escapeHTML(fromName)} · ${time}</div>
+    <div class="msg-meta">
+      <span class="msg-meta-text">${escapeHTML(fromName)} · ${time}</span>
+      <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="复制此条">复制</button>
+    </div>
     ${body}
   `;
 
@@ -485,6 +605,7 @@ function connect(name) {
 
     if (data.type === "history") {
       els.messages.innerHTML = "";
+      chatLog = [];
       (data.messages || []).forEach((msg) => {
         const isSelf = selfDevice && msg.from?.id === selfDevice.id;
         appendMessage(msg, isSelf);
@@ -517,16 +638,40 @@ async function sendText() {
  * 其他设备收到消息后，从 /api/files/{id} 下载。
  */
 async function uploadAndSend(file) {
-  const form = new FormData();
-  form.append("file", file);
-
-  const resp = await fetch("/api/upload", { method: "POST", body: form });
-  if (!resp.ok) {
-    alert("上传失败，请重试");
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    alert("未连接聊天室，无法发送文件。请确认顶部显示「已连接」后再试。");
     return;
   }
 
-  const result = await resp.json();
+  const form = new FormData();
+  form.append("file", file);
+
+  let resp;
+  try {
+    resp = await fetch("/api/upload", { method: "POST", body: form });
+  } catch (err) {
+    alert(`上传失败：${err.message}`);
+    return;
+  }
+
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim().slice(0, 200);
+    alert(`上传失败 (HTTP ${resp.status})${detail ? `：${detail}` : ""}`);
+    return;
+  }
+
+  let result;
+  try {
+    result = await resp.json();
+  } catch {
+    alert("上传失败：服务器返回无效数据");
+    return;
+  }
+
+  if (!result.fileId) {
+    alert("上传失败：未获得 fileId");
+    return;
+  }
 
   sendWS({
     kind: result.mime?.startsWith("image/") ? "image" : "file",
@@ -679,6 +824,7 @@ function leaveChat() {
   }
   chatName = null;
   selfDevice = null;
+  chatLog = [];
   document.body.classList.remove("in-chat");
   document.documentElement.classList.remove("in-chat");
   document.documentElement.style.removeProperty("--composer-offset");
@@ -687,6 +833,30 @@ function leaveChat() {
   els.chatScreen.classList.add("hidden");
   els.joinScreen.classList.remove("hidden");
   els.messages.innerHTML = "";
+}
+
+/** 输入框粘贴剪贴板图片时直接上传发送 */
+async function handleComposerPaste(e) {
+  const cd = e.clipboardData;
+  if (!cd) return;
+
+  const imageFiles = [];
+  for (const item of cd.items) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) imageFiles.push(file);
+  }
+  if (imageFiles.length === 0) return;
+
+  e.preventDefault();
+  for (let i = 0; i < imageFiles.length; i++) {
+    let file = imageFiles[i];
+    if (!file.name) {
+      const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+      file = new File([file], `paste-${Date.now()}-${i}.${ext}`, { type: file.type });
+    }
+    await uploadAndSend(file);
+  }
 }
 
 // --- 事件绑定 ---
@@ -707,6 +877,13 @@ els.toggleDevicesBtn?.addEventListener("click", () => {
 els.sidebarBackdrop?.addEventListener("click", () => setDevicesPanel(false));
 
 els.messages.addEventListener("click", (e) => {
+  const copyBtn = e.target.closest(".msg-copy-btn");
+  if (copyBtn) {
+    e.preventDefault();
+    copyOneMessage(Number(copyBtn.dataset.msgIdx));
+    return;
+  }
+
   const link = e.target.closest(".file-download");
   if (!link || link.classList.contains("is-downloading")) return;
   if (!needsBlobDownload()) return; // 移动端：交给原生 <a download>，立即响应
@@ -714,7 +891,10 @@ els.messages.addEventListener("click", (e) => {
   downloadFile(link.dataset.fileId, link.dataset.fileName, link);
 });
 
+els.copyChatBtn?.addEventListener("click", copyAllChat);
+
 els.sendBtn.addEventListener("click", sendText);
+els.messageInput.addEventListener("paste", handleComposerPaste);
 els.messageInput.addEventListener("keydown", (e) => {
   // Enter 发送，Shift+Enter 换行
   if (e.key === "Enter" && !e.shiftKey) {

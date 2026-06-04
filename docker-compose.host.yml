@@ -14,8 +14,9 @@ services:
     environment:
       LANROOM_UPLOAD_DIR: /data/uploads
       LANROOM_HOSTNAME: ${LANROOM_HOSTNAME:-myarch}
-      # 可选：DHCP 多网卡时固定 mDNS 广播 IP（换网段后改一次即可）
       LANROOM_ADVERTISE_IP: ${LANROOM_ADVERTISE_IP:-}
+      # 单文件上传上限（MiB），默认 500，最大 4096
+      LANROOM_MAX_UPLOAD_MB: ${LANROOM_MAX_UPLOAD_MB:-}
     volumes:
       - lanroom-uploads:/data/uploads
     healthcheck:
@@ -23,7 +24,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 20s
 
 volumes:
   lanroom-uploads:

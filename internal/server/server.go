@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"three-end-transmission/internal/config"
 	"three-end-transmission/internal/hub"
 	"three-end-transmission/internal/mdns"
 
@@ -24,10 +25,11 @@ import (
 )
 
 type Config struct {
-	Port       int
-	StaticFS   http.FileSystem
-	Mdns       *mdns.Registration
-	UploadDir  string
+	Port            int
+	StaticFS        http.FileSystem
+	Mdns            *mdns.Registration
+	UploadDir       string
+	MaxUploadBytes  int64
 }
 
 type Server struct {
@@ -70,7 +72,8 @@ type infoResponse struct {
 	Port        int      `json:"port"`
 	LocalIPs    []string `json:"localIps"`
 	URLs        []string `json:"urls"`
-	ClientCount int      `json:"clientCount"`
+	ClientCount int `json:"clientCount"`
+	MaxUploadMB int `json:"maxUploadMb"`
 }
 
 func New(cfg Config) *Server {
@@ -78,6 +81,10 @@ func New(cfg Config) *Server {
 		cfg.UploadDir = filepath.Join(os.TempDir(), "three-end-transmission-uploads")
 	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
+
+	if cfg.MaxUploadBytes <= 0 {
+		cfg.MaxUploadBytes = config.MaxUploadBytes()
+	}
 
 	return &Server{
 		cfg: cfg,
@@ -164,6 +171,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		URLs:        urls,
 		JoinURL:     s.preferredJoinURL(ips),
 		ClientCount: s.hub.ClientCount(),
+		MaxUploadMB: int(s.cfg.MaxUploadBytes >> 20),
 	}
 	if reg := s.mdnsReg(); reg != nil {
 		resp.Hostname = reg.Hostname()
@@ -259,11 +267,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const maxUpload = 100 << 20 // 100 MiB
+	maxUpload := s.cfg.MaxUploadBytes
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
-		http.Error(w, "file too large or invalid form", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("file too large (max %d MiB) or invalid form", maxUpload>>20), http.StatusBadRequest)
 		return
 	}
 
@@ -283,6 +291,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	destPath := filepath.Join(s.cfg.UploadDir, id)
 	dest, err := os.Create(destPath)
 	if err != nil {
+		slog.Error("upload create file failed", "path", destPath, "err", err)
 		http.Error(w, "cannot save file", http.StatusInternalServerError)
 		return
 	}

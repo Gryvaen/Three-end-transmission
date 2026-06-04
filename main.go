@@ -50,7 +50,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("hub started", "addr", httpServer.Addr)
+		slog.Info("hub started", "addr", httpServer.Addr, "maxUploadMiB", config.MaxUploadMB())
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server stopped", "err", err)
 			os.Exit(1)

@@ -338,6 +338,7 @@ LANROOM_PORT=8888 docker compose up -d --build
 |------|------|------|
 | `LANROOM_HOSTNAME` | mDNS 注册主机名 | 系统 `hostname`；Docker 未设置时可能跳过 mDNS |
 | `LANROOM_ADVERTISE_IP` | 对外展示的局域网 IP（Bridge / 多网卡） | 自动检测网卡 |
+| `LANROOM_MAX_UPLOAD_MB` | 单文件上传上限（MiB），默认 `500`，封顶 `4096` | `500` |
 | `LANROOM_UPLOAD_DIR` | 上传文件目录 | 系统临时目录下的 `three-end-transmission-uploads` |
 
 ### CLI 客户端
@@ -363,7 +364,7 @@ LANROOM_PORT=8888 docker compose up -d --build
 | 默认端口 | `8787`（`internal/config.DefaultPort`） |
 | WebSocket 单条消息 | 最大 **512 KB** |
 | HTTP `/api/send` 请求体 | 最大 **512 KB** |
-| 单文件上传 | 最大 **100 MiB** |
+| 单文件上传 | 默认 **500 MiB**，可用 `LANROOM_MAX_UPLOAD_MB` 调整（最大 4096） |
 | 聊天历史 TTL | **10 分钟**（内存，重启丢失） |
 | 上传文件 TTL | **10 分钟**（后台定时清理） |
 | 文件 ID | 32 位十六进制 |
@@ -579,7 +580,7 @@ curl -s http://127.0.0.1:8787/api/info | jq '.mdnsUrl'
 | `mdnsUrl` 为空 | 重建容器：`LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build`；查看日志应有 `mDNS active` |
 | 解析到 `172.x` | 旧镜像；重建。或设 `LANROOM_ADVERTISE_IP=192.168.x.x` |
 | Avahi 未运行 | `sudo systemctl enable --now avahi-daemon` |
-| 开着 Meta/Clash | 关系统代理或改用 `http://192.168.x.x:8787` |
+| 开着 Meta/Clash | `/etc/hosts` 备用：执行 `sudo ./deploy/sync-lanroom-hosts.sh`；或关代理 / 放行局域网 |
 | Arch 无法解析 | 安装 `nss-mdns`，`nsswitch.conf` 的 `hosts` 行加入 `mdns4_minimal [NOTFOUND=return]` |
 
 Host 模式需 `LANROOM_HOSTNAME` 与 `hostname` 一致。
@@ -588,6 +589,29 @@ Host 模式需 `LANROOM_HOSTNAME` 与 `hostname` 一致。
 
 - WiFi 设为 **专用网络**
 - 防火墙允许 **8787** 或 `lanroom.exe`
+
+### Linux 上传文件失败？
+
+1. **页面上方是否「已连接」？** 未连接时 WebSocket 发不出去（HTTP 上传成功也不会出现在聊天里）。
+2. **dwm 等极简桌面：** 📎 可能弹不出文件选择框 → 用命令行：
+   ```bash
+   ./lanroom-cli -host http://127.0.0.1:8787 ./你的文件.pdf
+   ```
+3. **Docker 报 `cannot save file`：** 重建容器（入口脚本会 `chown` 上传目录）：
+   ```bash
+   LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build
+   ```
+4. **单文件超过上限** 会被拒绝；默认 500 MiB，可在 Hub 环境变量调大（见下）。
+5. 刷新页面后重试；仍失败请看浏览器弹窗里的 **HTTP 状态码** 或 `sudo docker logs lanroom --tail 20`。
+
+**调大上传上限（例如 2 GiB）：**
+
+```bash
+LANROOM_MAX_UPLOAD_MB=2048 LANROOM_HOSTNAME=myarch \
+  sudo docker compose -f docker-compose.host.yml up -d --build
+```
+
+`curl -s http://127.0.0.1:8787/api/info | jq .maxUploadMb` 可查看当前生效值。
 
 ### 文件存在哪？
 

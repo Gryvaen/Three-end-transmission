@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh LanRoom /etc/hosts every 5 minutes (DHCP IP changes)
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

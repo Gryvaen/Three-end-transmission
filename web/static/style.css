@@ -451,8 +451,33 @@ button:disabled {
 }
 
 .msg-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 0.75rem;
   color: var(--muted);
+}
+
+.msg.self .msg-meta {
+  flex-direction: row-reverse;
+}
+
+.msg-copy-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.msg-copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .msg-bubble {

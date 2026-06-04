@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync LanRoom hostname to /etc/hosts (bypass proxy mDNS issues)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=LANROOM_HOSTNAME=myarch
+ExecStart=/usr/local/bin/sync-lanroom-hosts.sh
+
+[Install]
+WantedBy=multi-user.target
