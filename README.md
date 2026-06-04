@@ -469,7 +469,7 @@ Three_end_transmission/
 
 | 路径 | 方法 | 说明 |
 |------|------|------|
-| `/api/info` | GET | 连接信息（IP 列表、mDNS、在线人数） |
+| `/api/info` | GET | 连接信息（IP、mDNS、Android/iOS 推荐加入 URL） |
 | `/api/qrcode` | GET | PNG 二维码，`?url=` 指定内容 |
 | `/api/send` | POST | CLI / 脚本发送（JSON） |
 | `/api/upload` | POST | `multipart/form-data`，字段 `file` |
@@ -482,10 +482,13 @@ Three_end_transmission/
   "hostname": "myarch",
   "mdnsUrl": "http://myarch.local:8787",
   "joinUrl": "http://192.168.117.224:8787",
+  "androidJoinUrl": "http://192.168.117.224:8787",
+  "iosJoinUrl": "http://myarch.local:8787",
   "port": 8787,
   "localIps": ["192.168.117.224"],
   "urls": ["http://192.168.117.224:8787", "http://myarch.local:8787"],
-  "clientCount": 2
+  "clientCount": 2,
+  "maxUploadMb": 500
 }
 ```
 

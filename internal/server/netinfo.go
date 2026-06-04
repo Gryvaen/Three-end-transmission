@@ -3,65 +3,26 @@ package server
 import (
 	"net"
 	"net/http"
-	"os"
 	"strings"
+
+	"three-end-transmission/internal/netutil"
 )
 
-func LANIPv4Addresses() []string {
-	return collectLANIPv4()
+// AdvertiseLANIPs 供 mDNS Keeper 等后台任务获取局域网 IP（无 HTTP 请求上下文）。
+func AdvertiseLANIPs() []string {
+	return AdvertiseIPv4Addresses(nil)
 }
 
 // AdvertiseIPv4Addresses 返回应对外展示的局域网 IP（Docker 内会过滤 172.x 容器网段）。
 // 优先级：LANROOM_ADVERTISE_IP > 本机网卡 > HTTP Host 头中的 IP。
 func AdvertiseIPv4Addresses(r *http.Request) []string {
-	seen := make(map[string]struct{})
-	var out []string
-
-	add := func(ip string) {
-		ip = strings.TrimSpace(ip)
-		if ip == "" {
-			return
-		}
-		parsed := net.ParseIP(ip)
-		if parsed == nil {
-			return
-		}
-		parsed = parsed.To4()
-		if parsed == nil || !isLANIPv4(parsed) {
-			return
-		}
-		normalized := parsed.String()
-		if _, ok := seen[normalized]; ok {
-			return
-		}
-		seen[normalized] = struct{}{}
-		out = append(out, normalized)
-	}
-
-	for _, ip := range envAdvertiseIPs() {
-		add(ip)
-	}
-	for _, ip := range LANIPv4Addresses() {
-		add(ip)
-	}
+	var raw []string
+	raw = append(raw, netutil.EnvAdvertiseIPs()...)
+	raw = append(raw, netutil.CollectLANIPv4()...)
 	if r != nil {
-		for _, ip := range ipsFromHTTPHost(r.Host) {
-			add(ip)
-		}
+		raw = append(raw, ipsFromHTTPHost(r.Host)...)
 	}
-
-	return out
-}
-
-func envAdvertiseIPs() []string {
-	raw := strings.TrimSpace(os.Getenv("LANROOM_ADVERTISE_IP"))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ' ' || r == ';'
-	})
-	return parts
+	return netutil.FilterLANIPv4(raw)
 }
 
 func ipsFromHTTPHost(host string) []string {
@@ -78,52 +39,6 @@ func ipsFromHTTPHost(host string) []string {
 		return []string{h}
 	}
 	return nil
-}
-
-func collectLANIPv4() []string {
-	var addrs []string
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return addrs
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if isVirtualInterface(iface.Name) {
-			continue
-		}
-
-		entries, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, entry := range entries {
-			var ip net.IP
-			switch v := entry.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			ip = ip.To4()
-			if ip == nil {
-				continue
-			}
-			if !isLANIPv4(ip) {
-				continue
-			}
-			addrs = append(addrs, ip.String())
-		}
-	}
-
-	return addrs
 }
 
 func ClientIP(r *http.Request) string {
@@ -160,9 +75,8 @@ func normalizeClientIP(raw string) string {
 		return v4.String()
 	}
 
-	// 本机或本机网卡地址（如通过 myarch.local 的 AAAA 连入）→ 展示 Wi‑Fi IPv4
 	if ip.IsLoopback() || isLocalInterfaceIP(ip) {
-		if ips := LANIPv4Addresses(); len(ips) > 0 {
+		if ips := netutil.CollectLANIPv4(); len(ips) > 0 {
 			return ips[0]
 		}
 		if ip.IsLoopback() {
@@ -170,7 +84,6 @@ func normalizeClientIP(raw string) string {
 		}
 	}
 
-	// 其余 IPv6 原样返回（跨设备纯 IPv6 连接时无法推断 IPv4）
 	return ip.String()
 }
 
@@ -199,37 +112,4 @@ func isLocalInterfaceIP(ip net.IP) bool {
 		}
 	}
 	return false
-}
-
-func isVirtualInterface(name string) bool {
-	name = strings.ToLower(name)
-	virtualPrefixes := []string{
-		"docker", "br-", "veth", "tun", "tap", "wg", "utun",
-		"virbr", "vmnet", "vboxnet", "lo", "cni", "flannel", "meta",
-	}
-	for _, prefix := range virtualPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func isLANIPv4(ip net.IP) bool {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return false
-	}
-
-	switch {
-	case ip4[0] == 192 && ip4[1] == 168:
-		return true
-	case ip4[0] == 10:
-		return true
-	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
-		// 172.16/12 多为 Docker 等虚拟网桥，手机无法访问
-		return false
-	default:
-		return false
-	}
 }

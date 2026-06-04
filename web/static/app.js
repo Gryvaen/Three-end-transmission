@@ -6,6 +6,8 @@
 const STORAGE_KEY = "lanroom-device-name";
 const FILE_ID_RE = /^[a-f0-9]{32}$/;
 
+const COMPOSER_PLACEHOLDER = "输入消息…，可粘贴图片";
+
 const platformIcons = {
   android: "🤖",
   windows: "🪟",
@@ -38,7 +40,7 @@ const platformUI = {
     subtitle: "Fluent 风格",
     defaultName: "Windows PC",
     namePlaceholder: "例如：DESKTOP-PC",
-    composerPlaceholder: "输入消息…，可粘贴图片",
+    composerPlaceholder: COMPOSER_PLACEHOLDER,
     themeColor: "#202020",
   },
   linux: {
@@ -46,7 +48,7 @@ const platformUI = {
     subtitle: "GNOME 风格 · 文件可用 lanroom-cli 发送",
     defaultName: "Linux 设备",
     namePlaceholder: "例如：arch-pc",
-    composerPlaceholder: "输入消息…，可粘贴图片",
+    composerPlaceholder: COMPOSER_PLACEHOLDER,
     themeColor: "#241f31",
   },
   macos: {
@@ -54,7 +56,7 @@ const platformUI = {
     subtitle: "桌面风格",
     defaultName: "Mac",
     namePlaceholder: "例如：MacBook",
-    composerPlaceholder: "输入消息…，可粘贴图片",
+    composerPlaceholder: COMPOSER_PLACEHOLDER,
     themeColor: "#1e1e1e",
   },
   unknown: {
@@ -62,7 +64,7 @@ const platformUI = {
     subtitle: "局域网聊天式互传 · 浏览器打开即用",
     defaultName: "我的设备",
     namePlaceholder: "例如：我的设备",
-    composerPlaceholder: "输入消息…，可粘贴图片",
+    composerPlaceholder: COMPOSER_PLACEHOLDER,
     themeColor: "#0f1419",
   },
 };
@@ -265,6 +267,14 @@ function safeFileURL(fileId) {
   return `/api/files/${fileId}`;
 }
 
+async function fetchFileBlob(fileId) {
+  const url = safeFileURL(fileId);
+  if (!url) return null;
+  const resp = await fetch(url);
+  if (!resp.ok) return null;
+  return resp.blob();
+}
+
 function formatTime(ts) {
   const d = new Date(ts * 1000);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -361,9 +371,8 @@ async function copyImageToClipboard(fileId) {
 
   const link = `${location.origin}${url}`;
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return copyToClipboard(link);
-    const blob = await resp.blob();
+    const blob = await fetchFileBlob(fileId);
+    if (!blob) return copyToClipboard(link);
     const type = blob.type?.startsWith("image/") ? blob.type : "image/png";
     if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
       await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
@@ -403,10 +412,10 @@ async function copyToClipboard(text) {
   }
 }
 
-function flashCopyBtn(btn, ok) {
+function flashCopyBtn(btn, ok, okLabel = "已复制", failLabel = "失败") {
   if (!btn) return;
   const prev = btn.textContent;
-  btn.textContent = ok ? "已复制" : "失败";
+  btn.textContent = ok ? okLabel : failLabel;
   btn.disabled = true;
   setTimeout(() => {
     btn.textContent = prev;
@@ -439,12 +448,7 @@ async function copyOneMessage(idx) {
 
   if (ok) {
     const btn = els.messages.querySelector(`.msg-copy-btn[data-msg-idx="${idx}"]`);
-    if (btn) {
-      btn.textContent = "已复制";
-      setTimeout(() => {
-        btn.textContent = "复制";
-      }, 1200);
-    }
+    flashCopyBtn(btn, true);
   }
 }
 
@@ -498,7 +502,7 @@ function appendMessage(msg, isSelf) {
 
   wrapper.innerHTML = `
     <div class="msg-meta">
-      <span class="msg-meta-text">${escapeHTML(fromName)} · ${time}</span>
+      <span>${escapeHTML(fromName)} · ${time}</span>
       <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="复制此条">复制</button>
     </div>
     ${body}
@@ -524,12 +528,11 @@ async function downloadFile(fileId, fileName, triggerEl) {
   }
 
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) {
+    const blob = await fetchFileBlob(fileId);
+    if (!blob) {
       alert("下载失败，文件可能已过期");
       return;
     }
-    const blob = await resp.blob();
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
@@ -692,21 +695,6 @@ async function loadConnectionInfo() {
   return resp.json();
 }
 
-/**
- * 是否为局域网 IPv4 地址（适合手机扫码 / 二维码）。
- */
-function isLANIPv4Origin(origin) {
-  try {
-    const host = new URL(origin).hostname.toLowerCase();
-    return (
-      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
-      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
-    );
-  } catch {
-    return false;
-  }
-}
-
 function isMdnsURL(url) {
   try {
     return new URL(url).hostname.toLowerCase().endsWith(".local");
@@ -715,31 +703,15 @@ function isMdnsURL(url) {
   }
 }
 
-function firstIPv4JoinURL(info) {
-  if (info.joinUrl && !isMdnsURL(info.joinUrl)) return info.joinUrl;
-  for (const url of info.urls || []) {
-    if (!isMdnsURL(url)) return url;
-  }
-  return "";
+function isLANIPv4Host(host) {
+  const h = String(host).toLowerCase();
+  return /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
-function firstMdnsJoinURL(info) {
-  if (info.mdnsUrl) return info.mdnsUrl;
-  if (info.joinUrl && isMdnsURL(info.joinUrl)) return info.joinUrl;
-  for (const url of info.urls || []) {
-    if (isMdnsURL(url)) return url;
-  }
-  return "";
-}
-
-/** Android 二维码：局域网 IPv4 */
+/** Android 二维码：优先当前页已是局域网 IP，否则用服务端 androidJoinUrl */
 function pickAndroidJoinURL(info) {
-  if (isLANIPv4Origin(location.origin)) {
-    return location.origin;
-  }
-  const ipv4 = firstIPv4JoinURL(info);
-  if (ipv4) return ipv4;
-  return info.joinUrl || location.href;
+  if (isLANIPv4Host(location.hostname)) return location.origin;
+  return info.androidJoinUrl || info.joinUrl || location.href;
 }
 
 /**
@@ -755,7 +727,7 @@ async function showInfoDialog() {
   els.urlList.innerHTML = "";
 
   const androidUrl = pickAndroidJoinURL(info);
-  const iosUrl = firstMdnsJoinURL(info);
+  const iosUrl = info.iosJoinUrl || "";
   const ts = Date.now();
 
   const items = [];
@@ -866,8 +838,9 @@ els.joinBtn.addEventListener("click", () => {
   enterChat(name);
 });
 
-els.showInfoBtn.addEventListener("click", showInfoDialog);
-els.infoPanelBtn.addEventListener("click", showInfoDialog);
+for (const btn of [els.showInfoBtn, els.infoPanelBtn]) {
+  btn?.addEventListener("click", showInfoDialog);
+}
 els.closeInfoBtn.addEventListener("click", () => els.infoDialog.close());
 els.leaveBtn.addEventListener("click", leaveChat);
 

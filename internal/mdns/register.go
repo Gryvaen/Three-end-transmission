@@ -3,11 +3,11 @@ package mdns
 import (
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
 
 	"github.com/grandcat/zeroconf"
+	"three-end-transmission/internal/netutil"
 )
 
 const (
@@ -21,28 +21,19 @@ type Registration struct {
 	port     int
 }
 
-// Register 在局域网注册 mDNS 服务。advertiseIPs 应为真实 LAN IPv4（如 192.168.x.x），
-// 避免 Docker 网桥 172.x 被解析导致 myarch.local 打不开。
+// Register 在局域网注册 mDNS 服务。advertiseIPs 应由 server.AdvertiseIPv4Addresses 提供。
 func Register(port int, advertiseIPs []string) (*Registration, error) {
-	hostname := strings.TrimSpace(os.Getenv("LANROOM_HOSTNAME"))
-	if hostname == "" {
-		var err error
-		hostname, err = os.Hostname()
-		if err != nil || hostname == "" {
-			hostname = "lan-room"
-		}
-	}
-
+	hostname := resolveHostname()
 	if shouldSkipMDNS(hostname) {
 		return nil, fmt.Errorf("mdns skipped in docker (set LANROOM_HOSTNAME or use host network)")
 	}
 
-	ips := normalizeAdvertiseIPs(advertiseIPs)
+	ips := netutil.FilterLANIPv4(advertiseIPs)
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("no LAN IPv4 for mDNS (set LANROOM_ADVERTISE_IP or check Wi-Fi)")
 	}
 
-	ifaces := lanMulticastInterfaces()
+	ifaces := netutil.MulticastInterfaces()
 	if len(ifaces) == 0 {
 		return nil, fmt.Errorf("no multicast interface for mDNS")
 	}
@@ -71,144 +62,16 @@ func Register(port int, advertiseIPs []string) (*Registration, error) {
 	}, nil
 }
 
-func normalizeAdvertiseIPs(raw []string) []string {
-	seen := make(map[string]struct{})
-	var out []string
-	add := func(ip string) {
-		ip = strings.TrimSpace(ip)
-		parsed := net.ParseIP(ip)
-		if parsed == nil {
-			return
-		}
-		parsed = parsed.To4()
-		if parsed == nil || !isLANIPv4(parsed) {
-			return
-		}
-		n := parsed.String()
-		if _, ok := seen[n]; ok {
-			return
-		}
-		seen[n] = struct{}{}
-		out = append(out, n)
+func resolveHostname() string {
+	hostname := strings.TrimSpace(os.Getenv("LANROOM_HOSTNAME"))
+	if hostname != "" {
+		return hostname
 	}
-
-	for _, ip := range raw {
-		add(ip)
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "lan-room"
 	}
-	for _, ip := range envAdvertiseIPs() {
-		add(ip)
-	}
-	if len(out) == 0 {
-		for _, ip := range collectLANIPv4() {
-			add(ip)
-		}
-	}
-	return out
-}
-
-func envAdvertiseIPs() []string {
-	raw := strings.TrimSpace(os.Getenv("LANROOM_ADVERTISE_IP"))
-	if raw == "" {
-		return nil
-	}
-	return strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ' ' || r == ';'
-	})
-}
-
-func collectLANIPv4() []string {
-	var addrs []string
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return addrs
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if isVirtualInterface(iface.Name) {
-			continue
-		}
-
-		entries, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, entry := range entries {
-			var ip net.IP
-			switch v := entry.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			ip = ip.To4()
-			if ip == nil || !isLANIPv4(ip) {
-				continue
-			}
-			addrs = append(addrs, ip.String())
-		}
-	}
-	return addrs
-}
-
-func lanMulticastInterfaces() []net.Interface {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-
-	var out []net.Interface
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
-			continue
-		}
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if isVirtualInterface(iface.Name) {
-			continue
-		}
-		out = append(out, iface)
-	}
-	return out
-}
-
-func isVirtualInterface(name string) bool {
-	name = strings.ToLower(name)
-	virtualPrefixes := []string{
-		"docker", "br-", "veth", "tun", "tap", "wg", "utun",
-		"virbr", "vmnet", "vboxnet", "lo", "cni", "flannel", "meta",
-	}
-	for _, prefix := range virtualPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func isLANIPv4(ip net.IP) bool {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return false
-	}
-	switch {
-	case ip4[0] == 192 && ip4[1] == 168:
-		return true
-	case ip4[0] == 10:
-		return true
-	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
-		return false
-	default:
-		return false
-	}
+	return h
 }
 
 func (r *Registration) Hostname() string {

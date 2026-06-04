@@ -34,14 +34,11 @@ func main() {
 	srv := server.New(server.Config{
 		Port:      *port,
 		StaticFS:  http.FS(static),
-		Mdns:      nil,
 		UploadDir: uploadDir,
 	})
 	srv.StartFileCleanup()
 
-	keeper := mdns.NewKeeper(*port, func() []string {
-		return server.AdvertiseIPv4Addresses(nil)
-	})
+	keeper := mdns.NewKeeper(*port, server.AdvertiseLANIPs)
 	go keeper.Run(srv.SetMdns)
 
 	httpServer := &http.Server{

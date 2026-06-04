@@ -2,6 +2,7 @@ package mdns
 
 import (
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,10 +22,18 @@ func NewKeeper(port int, ipsFn func() []string) *Keeper {
 	return &Keeper{port: port, ipsFn: ipsFn}
 }
 
+func ipsKey(ips []string) string {
+	if len(ips) == 0 {
+		return ""
+	}
+	cp := append([]string(nil), ips...)
+	sort.Strings(cp)
+	return strings.Join(cp, ",")
+}
+
 func (k *Keeper) Run(onUpdate func(*Registration)) {
 	try := func() {
-		ips := k.ipsFn()
-		key := strings.Join(ips, ",")
+		key := ipsKey(k.ipsFn())
 		if key == "" {
 			return
 		}
@@ -41,7 +50,7 @@ func (k *Keeper) Run(onUpdate func(*Registration)) {
 			old.Shutdown()
 		}
 
-		reg, err := Register(k.port, ips)
+		reg, err := Register(k.port, strings.Split(key, ","))
 		if err != nil {
 			slog.Warn("mDNS register failed", "err", err)
 			return

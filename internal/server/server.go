@@ -47,10 +47,6 @@ func (s *Server) SetMdns(reg *mdns.Registration) {
 	s.cfg.Mdns = reg
 }
 
-func (s *Server) MdnsRegistered() bool {
-	return s.mdnsReg() != nil
-}
-
 func (s *Server) mdnsReg() *mdns.Registration {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -66,14 +62,16 @@ type fileRecord struct {
 }
 
 type infoResponse struct {
-	Hostname    string   `json:"hostname"`
-	MdnsURL     string   `json:"mdnsUrl"`
-	JoinURL     string   `json:"joinUrl"`
-	Port        int      `json:"port"`
-	LocalIPs    []string `json:"localIps"`
-	URLs        []string `json:"urls"`
-	ClientCount int `json:"clientCount"`
-	MaxUploadMB int `json:"maxUploadMb"`
+	Hostname       string   `json:"hostname"`
+	MdnsURL        string   `json:"mdnsUrl"`
+	JoinURL        string   `json:"joinUrl"`
+	AndroidJoinURL string   `json:"androidJoinUrl"`
+	IOSJoinURL     string   `json:"iosJoinUrl"`
+	Port           int      `json:"port"`
+	LocalIPs       []string `json:"localIps"`
+	URLs           []string `json:"urls"`
+	ClientCount    int      `json:"clientCount"`
+	MaxUploadMB    int      `json:"maxUploadMb"`
 }
 
 func New(cfg Config) *Server {
@@ -164,18 +162,27 @@ func (s *Server) preferredJoinURL(lanIPs []string) string {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	ips := AdvertiseIPv4Addresses(r)
 	urls := s.joinURLs(ips)
+	join := s.preferredJoinURL(ips)
+
+	reg := s.mdnsReg()
+	var mdnsURL string
+	if reg != nil {
+		mdnsURL = reg.URL()
+	}
 
 	resp := infoResponse{
-		Port:        s.cfg.Port,
-		LocalIPs:    ips,
-		URLs:        urls,
-		JoinURL:     s.preferredJoinURL(ips),
-		ClientCount: s.hub.ClientCount(),
-		MaxUploadMB: int(s.cfg.MaxUploadBytes >> 20),
+		Port:           s.cfg.Port,
+		LocalIPs:       ips,
+		URLs:           urls,
+		JoinURL:        join,
+		AndroidJoinURL: firstIPv4JoinURL(urls, join),
+		IOSJoinURL:     firstMdnsJoinURL(urls, mdnsURL, join),
+		ClientCount:    s.hub.ClientCount(),
+		MaxUploadMB:    int(s.cfg.MaxUploadBytes >> 20),
 	}
-	if reg := s.mdnsReg(); reg != nil {
+	if reg != nil {
 		resp.Hostname = reg.Hostname()
-		resp.MdnsURL = reg.URL()
+		resp.MdnsURL = mdnsURL
 	}
 
 	w.Header().Set("Content-Type", "application/json")
