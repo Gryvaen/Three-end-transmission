@@ -12,7 +12,6 @@ import (
 	"syscall"
 
 	"three-end-transmission/internal/config"
-	"three-end-transmission/internal/mdns"
 	"three-end-transmission/internal/server"
 )
 
@@ -38,9 +37,6 @@ func main() {
 	})
 	srv.StartFileCleanup()
 
-	keeper := mdns.NewKeeper(*port, server.AdvertiseLANIPs)
-	go keeper.Run(srv.SetMdns)
-
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *port),
 		Handler: srv.Handler(),
@@ -58,6 +54,5 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	keeper.Shutdown()
 	_ = httpServer.Close()
 }

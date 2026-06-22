@@ -1,6 +1,5 @@
 # 忽略编译产物
 /lanroom
-/lanroom-cli
 /lanroom.exe
 *.exe
 

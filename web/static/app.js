@@ -45,7 +45,7 @@ const platformUI = {
   },
   linux: {
     badge: "Linux 版",
-    subtitle: "GNOME 风格 · 文件可用 lanroom-cli 发送",
+    subtitle: "GNOME 风格",
     defaultName: "Linux 设备",
     namePlaceholder: "例如：arch-pc",
     composerPlaceholder: COMPOSER_PLACEHOLDER,
@@ -94,11 +94,8 @@ const els = {
   infoDialog: document.getElementById("info-dialog"),
   closeInfoBtn: document.getElementById("close-info-btn"),
   urlList: document.getElementById("url-list"),
-  qrAndroid: document.getElementById("qr-android"),
-  qrIos: document.getElementById("qr-ios"),
-  qrIosCard: document.getElementById("qr-ios-card"),
-  qrAndroidUrl: document.getElementById("qr-android-url"),
-  qrIosUrl: document.getElementById("qr-ios-url"),
+  qrJoin: document.getElementById("qr-join"),
+  qrJoinUrl: document.getElementById("qr-join-url"),
   copyChatBtn: document.getElementById("copy-chat-btn"),
 };
 
@@ -120,10 +117,6 @@ function detectPlatform() {
   if (ua.includes("mac os") || ua.includes("macintosh")) return "macos";
   if (ua.includes("linux")) return "linux";
   return "unknown";
-}
-
-function isIOSChrome() {
-  return /CriOS/i.test(navigator.userAgent);
 }
 
 /** 移动端：动态计算输入栏高度与键盘偏移 */
@@ -227,17 +220,10 @@ function initPlatformUI() {
     }
   }
 
-  if (isIOSChrome()) {
+  if (isMobilePlatform()) {
     addJoinHint(
-      "ios-chrome-hint",
-      "iOS 的 Chrome 常无法打开 .local 地址。请改用 Safari，或在地址栏输入局域网 IP（如 http://192.168.x.x:8787）。"
-    );
-  }
-
-  if (platform === "android") {
-    addJoinHint(
-      "android-mdns-hint",
-      "Android 无法解析 .local 域名（如 myarch.local）。请扫电脑 Hub 页「连接信息」里的 IP 二维码，或手动输入 http://192.168.x.x:8787。"
+      "mobile-join-hint",
+      "手机请扫 Hub 页「连接信息」里的二维码，或手动输入 http://192.168.x.x:8787。"
     );
   }
 }
@@ -695,28 +681,18 @@ async function loadConnectionInfo() {
   return resp.json();
 }
 
-function isMdnsURL(url) {
-  try {
-    return new URL(url).hostname.toLowerCase().endsWith(".local");
-  } catch {
-    return String(url).includes(".local");
-  }
-}
-
 function isLANIPv4Host(host) {
   const h = String(host).toLowerCase();
   return /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
-/** Android 二维码：优先当前页已是局域网 IP，否则用服务端 androidJoinUrl */
-function pickAndroidJoinURL(info) {
+/** 加入地址：优先当前页已是局域网 IP，否则用服务端 joinUrl */
+function pickJoinURL(info) {
   if (isLANIPv4Host(location.hostname)) return location.origin;
-  return info.androidJoinUrl || info.joinUrl || location.href;
+  return info.joinUrl || location.href;
 }
 
-/**
- * 展示加入地址列表与双二维码（Android IPv4 / iOS .local）。
- */
+/** 展示加入地址与二维码 */
 async function showInfoDialog() {
   const info = await loadConnectionInfo();
   if (!info) {
@@ -726,44 +702,19 @@ async function showInfoDialog() {
 
   els.urlList.innerHTML = "";
 
-  const androidUrl = pickAndroidJoinURL(info);
-  const iosUrl = info.iosJoinUrl || "";
+  const joinUrl = pickJoinURL(info);
   const ts = Date.now();
 
-  const items = [];
-
   (info.urls || []).forEach((url) => {
-    const isMdns = isMdnsURL(url);
-    let label = "局域网 IP";
-    if (url === androidUrl) label = "Android 二维码";
-    else if (url === iosUrl) label = "iOS 二维码";
-    else if (isMdns) label = "mDNS（iOS / 电脑）";
-    if (items.some((i) => i.url === url)) return;
-    items.push({ label, url });
-  });
-
-  items.forEach((item) => {
     const div = document.createElement("div");
     div.className = "url-item";
-    div.innerHTML = `<strong>${escapeHTML(item.label)}</strong>${escapeHTML(item.url)}`;
+    div.innerHTML = `<strong>局域网地址</strong>${escapeHTML(url)}`;
     els.urlList.appendChild(div);
   });
 
-  if (els.qrAndroid && androidUrl) {
-    els.qrAndroid.src = `/api/qrcode?url=${encodeURIComponent(androidUrl)}&t=${ts}&tag=android`;
-    if (els.qrAndroidUrl) els.qrAndroidUrl.textContent = androidUrl;
-  }
-
-  if (els.qrIosCard && els.qrIos) {
-    if (iosUrl) {
-      els.qrIosCard.classList.remove("hidden");
-      els.qrIos.src = `/api/qrcode?url=${encodeURIComponent(iosUrl)}&t=${ts}&tag=ios`;
-      if (els.qrIosUrl) els.qrIosUrl.textContent = iosUrl;
-    } else {
-      els.qrIosCard.classList.add("hidden");
-      els.qrIos.removeAttribute("src");
-      if (els.qrIosUrl) els.qrIosUrl.textContent = "";
-    }
+  if (els.qrJoin && joinUrl) {
+    els.qrJoin.src = `/api/qrcode?url=${encodeURIComponent(joinUrl)}&t=${ts}`;
+    if (els.qrJoinUrl) els.qrJoinUrl.textContent = joinUrl;
   }
 
   els.infoDialog.showModal();
@@ -876,7 +827,7 @@ els.messageInput.addEventListener("keydown", (e) => {
   }
 });
 
-// 📎 按钮触发 file input；Linux 下若无效可用 lanroom-cli
+// 📎 按钮触发 file input
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", async () => {
   const files = [...(els.fileInput.files || [])];

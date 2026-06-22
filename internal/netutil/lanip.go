@@ -118,25 +118,3 @@ func IsLANIPv4(ip net.IP) bool {
 	}
 }
 
-// MulticastInterfaces 返回可用于 mDNS 组播的网卡。
-func MulticastInterfaces() []net.Interface {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil
-	}
-
-	var out []net.Interface
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
-			continue
-		}
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if IsVirtualInterface(iface.Name) {
-			continue
-		}
-		out = append(out, iface)
-	}
-	return out
-}

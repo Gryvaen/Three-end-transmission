@@ -2,7 +2,7 @@
 
 Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / iOS 只需 **打开浏览器** 即可互传文字、图片与文件，无需安装 App。
 
-支持 mDNS（`http://主机名.local:8787`）、双二维码加入、10 分钟聊天历史、各平台定制 UI，以及 Linux 命令行 `lanroom-cli`。
+以 **局域网 IP** 为唯一加入方式：IP 二维码、10 分钟聊天历史、各平台定制 UI。
 
 ---
 
@@ -13,7 +13,6 @@ Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / i
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [各设备如何加入](#各设备如何加入)
-- [Linux 命令行发送](#linux-命令行发送lanroom-cli)
 - [Docker 部署](#docker-部署)
 - [环境变量](#环境变量)
 - [限制与约定](#限制与约定)
@@ -33,12 +32,10 @@ Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / i
 | WebSocket 群聊 | 文字消息实时广播 |
 | 在线设备列表 | 显示昵称、IP、平台图标 |
 | 图片 / 文件 | 先 HTTP 上传，再 WebSocket 广播 `fileId` |
-| mDNS | `http://<主机名>.local:8787`，适应 DHCP 换 IP |
-| 双二维码 | Android 用局域网 IP；iOS 可用 `.local` |
+| IP 二维码 | 全平台通用，扫 `http://192.168.x.x:8787` 加入 |
 | 断线重连 | 聊天页内自动重连（离开聊天室不重连） |
 | 10 分钟历史 | 新设备加入可回看近期消息 |
 | 平台 UI | `platform.css` 按 Android / iOS / Windows / Linux / macOS 切换主题 |
-| CLI 发送 | `echo` / `cat` 管道或 `-t` 发文字、发文件 |
 
 ---
 
@@ -48,22 +45,18 @@ Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / i
 flowchart LR
   subgraph clients [客户端]
     Browser[浏览器 WebSocket]
-    CLI[lanroom-cli HTTP]
   end
 
   subgraph hub [Hub 进程]
     HTTP[HTTP API]
     WS[WebSocket Hub]
-    MDNS[mDNS 注册]
     Files[临时文件存储]
   end
 
   Browser -->|/ws| WS
   Browser -->|/api/upload /api/files| HTTP
-  CLI -->|/api/send /api/upload| HTTP
   HTTP --> WS
   HTTP --> Files
-  MDNS -.->|_lanroom._tcp| LAN[局域网]
 ```
 
 **消息流程（浏览器）：**
@@ -72,8 +65,6 @@ flowchart LR
 2. 服务端推送 `welcome`（本设备 ID）、`history`（近期消息）、`presence`（在线列表）
 3. 发文字：WebSocket 发送 `{ type: "message", payload: { kind: "text", ... } }`
 4. 发文件：先 `POST /api/upload` 获得 `fileId`，再 WebSocket 广播 `kind: "file"` 或 `"image"`
-
-**命令行** 不维持 WebSocket，通过 `POST /api/send` 直接向群聊广播。
 
 ---
 
@@ -84,30 +75,6 @@ flowchart LR
 | Go | **1.22+**（`go.mod` 可指定更高版本，支持 `GOTOOLCHAIN=auto`） |
 | 网络 | 设备在同一局域网，路由器关闭 **AP 隔离** |
 | Windows | 防火墙允许入站 **8787**（专用网络） |
-| Linux mDNS | 使用 `.local` 或 CLI `LANROOM_HOST=auto` 时需 [Avahi](#linux-前置条件avahi) |
-
-### Linux 前置条件：Avahi
-
-Hub 所在 Linux 若需 `http://主机名.local:8787`、CLI 自动发现或解析 `.local`，须安装 Avahi：
-
-```bash
-# Arch Linux
-sudo pacman -S avahi
-sudo systemctl enable --now avahi-daemon
-
-# Debian / Ubuntu
-sudo apt install avahi-daemon
-sudo systemctl enable --now avahi-daemon
-```
-
-验证（将 `myarch` 换成你的 `hostname`）：
-
-```bash
-ping -c 1 myarch.local
-avahi-resolve -n myarch.local
-```
-
-> Hub 仅本机使用、CLI 用 `127.0.0.1` 时可不装 Avahi。手机加入优先用 **IP 二维码**。
 
 ---
 
@@ -129,23 +96,16 @@ go run . -port 8787
 成功日志示例：
 
 ```
-level=INFO msg="mDNS registered" hostname=myarch url=http://myarch.local:8787
-level=INFO msg="hub started" addr=:8787
-```
-
-可选：指定 mDNS 主机名（与 `hostname` 不一致时）
-
-```bash
-LANROOM_HOSTNAME=myarch go run . -port 8787
+level=INFO msg="hub started" addr=:8787 maxUploadMiB=500
 ```
 
 ### 3. 打开浏览器
 
-| 方式 | 地址 |
+| 场景 | 地址 |
 |------|------|
-| mDNS（电脑推荐） | `http://<主机名>.local:8787` |
-| 局域网 IP | `http://192.168.x.x:8787` |
-| 二维码 | 页面 →「查看连接地址 / 二维码」 |
+| 本机 | `http://127.0.0.1:8787` |
+| 同网段其他设备 | `http://192.168.x.x:8787` |
+| 手机 | 页面 →「查看连接地址 / 二维码」扫码 |
 
 输入昵称 → **进入聊天室** → 发文字、图片、文件。
 
@@ -160,87 +120,17 @@ go build -o lanroom .
 
 ## 各设备如何加入
 
-连接信息弹窗提供 **两个二维码**，按平台选择：
+连接信息弹窗提供 **局域网 IP 二维码**，全平台通用：
 
-| 二维码 | 适用 | 地址示例 |
-|--------|------|----------|
-| **Android · 局域网 IP** | Android、通用 | `http://192.168.117.224:8787` |
-| **iOS · .local** | iOS Safari、电脑 | `http://myarch.local:8787` |
-
-**推荐策略：**
-
-- **电脑**：收藏 `http://<主机名>.local:8787`，IP 变了也能用
-- **Android**：扫 **IP 二维码** 或手动输入 IP（系统无法解析 `.local`）
-- **iOS Safari**：可扫 `.local` 二维码；Chrome 常不行，见 [各平台说明](#各平台说明)
+| 角色 | 推荐地址 |
+|------|----------|
+| 手机（全部平台） | 扫 IP 二维码，或手动输入 `http://192.168.x.x:8787` |
+| 本机浏览器 | `http://127.0.0.1:8787` |
+| 同网段电脑 | `http://192.168.x.x:8787` |
 
 手机若已保存过昵称，可在 URL 加 `?auto=1` 跳过进入页（需本地已有设备名缓存）。
 
-**动态 IP 时：** 在 Hub 机器打开「连接信息」，IP 变了就扫新码；电脑继续用 `.local` 即可。
-
----
-
-## Linux 命令行发送（lanroom-cli）
-
-浏览器 📎 在部分 Linux 桌面（如 dwm）可能无响应，可用 CLI 代替。
-
-### 编译
-
-```bash
-go build -o lanroom-cli ./cmd/lanroom-cli
-```
-
-### 用法
-
-```bash
-# 发文字
-echo "你好" | ./lanroom-cli
-./lanroom-cli -t "一条消息"
-
-# 指定 Hub
-echo "hello" | ./lanroom-cli -host http://192.168.117.224:8787
-
-# 发文件
-./lanroom-cli ./photo.png
-cat readme.md | ./lanroom-cli -n readme.md
-cat image.png | ./lanroom-cli -file -n image.png
-
-# 自定义发送者名称
-./lanroom-cli -name "arch-pc" -t "来自 CLI"
-```
-
-### Hub 地址解析顺序
-
-`lanroom-cli` 按以下优先级连接 Hub：
-
-1. `-host` 参数
-2. 环境变量 `LANROOM_HOST`
-3. mDNS 自动发现（`LANROOM_HOST=auto` 或未设置时的 fallback）
-4. `http://127.0.0.1:8787`
-
-```bash
-# 推荐：mDNS 域名，IP 变了不用改
-export LANROOM_HOST=http://myarch.local:8787
-
-# 自动发现（需 Avahi）
-export LANROOM_HOST=auto
-
-# 本机 Hub
-export LANROOM_HOST=http://127.0.0.1:8787
-```
-
-| `LANROOM_HOST` | 说明 |
-|----------------|------|
-| `http://主机名.local:8787` | **推荐**，适应动态 IP |
-| `http://192.168.x.x:8787` | 固定 IP，换 IP 需更新 |
-| `auto` | mDNS 发现局域网 Hub |
-| 未设置 | 先自动发现，失败则 `127.0.0.1:8787` |
-
-> 若报 `404 page not found`，可能是连到了 **旧 Hub 进程**（其他端口）。结束旧进程后重启：
->
-> ```bash
-> pkill -f 'lanroom|three-end-trans'
-> go run . -port 8787
-> ```
+**IP 变了怎么办？** 在 Hub 机器打开「连接信息」，扫新二维码即可。若路由器支持，可为 Hub 机器绑定 **静态 DHCP**，避免频繁换 IP。
 
 ---
 
@@ -248,62 +138,42 @@ export LANROOM_HOST=http://127.0.0.1:8787
 
 无需安装 Go，适合 NAS、服务器长期运行。
 
-### 方式 A：Host 网络 + mDNS（动态 IP 推荐）
+### 方式 A：Host 网络（Linux 推荐）
 
-路由器 DHCP 换 IP 时，仍可用 `http://<主机名>.local:8787` 访问。
+容器直接使用宿主机网络，自动获取局域网 IP，无需手动设置 `LANROOM_ADVERTISE_IP`。
 
-**要求：** Linux 宿主机、已装 Avahi、`docker-compose.host.yml`（Mac/Windows Docker Desktop **不支持** host 网络）。
-
-#### 一次性永久配置（推荐）
-
-在 Hub 宿主机执行（只需做一次）：
+**要求：** Linux 宿主机、`docker-compose.host.yml`（Mac/Windows Docker Desktop **不支持** host 网络）。
 
 ```bash
 cd /path/to/Three_end_transmission
-sudo ./deploy/setup-host-mdns.sh myarch
-```
-
-脚本会：启用 `avahi-daemon`、安装 `/etc/avahi/services/lanroom.service` 备用发布、提示配置 `nss-mdns`（解析 `*.local`）。
-
-应用内另有 **mDNS Keeper**：启动重试、Wi-Fi 晚就绪自动补注册、DHCP 换 IP 后每 90 秒自动更新。Docker 入口脚本会 **等局域网 IP 就绪** 再启动 Hub。
-
-```bash
-cd /path/to/Three_end_transmission
-
-# 若曾用 bridge 模式，先停掉
-sudo docker compose down
-
-# 启动（LANROOM_HOSTNAME 与 hostname 一致时可省略）
-LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build
+sudo docker compose -f docker-compose.host.yml up -d --build
 ```
 
 验证：
 
 ```bash
-ping -c 1 myarch.local
 sudo docker compose -f docker-compose.host.yml ps
 curl -s http://127.0.0.1:8787/api/info | jq .
 ```
 
 | 设备 | 访问方式 |
 |------|----------|
-| 电脑 | `http://myarch.local:8787` |
-| 手机 | 连接信息 → 扫 **IP 二维码**（Android）或 **.local 码**（iOS Safari） |
-| CLI | `LANROOM_HOST=http://myarch.local:8787 ./lanroom-cli -t "你好"` |
+| 本机 | `http://127.0.0.1:8787` |
+| 手机 / 其他设备 | 连接信息 → 扫 **IP 二维码** |
 
 维护：
 
 ```bash
 sudo docker compose -f docker-compose.host.yml logs -f
 sudo docker compose -f docker-compose.host.yml down
-LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build
+sudo docker compose -f docker-compose.host.yml up -d --build
 ```
 
 `restart: unless-stopped` 已配置；配合 `systemctl enable docker` 可开机自启。
 
 ### 方式 B：Bridge 端口映射
 
-快速试用；mDNS 在容器内通常不可用，请用 **局域网 IP** 访问。
+快速试用；请用 **局域网 IP** 访问。
 
 ```bash
 docker compose up -d --build
@@ -336,23 +206,15 @@ LANROOM_PORT=8888 docker compose up -d --build
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `LANROOM_HOSTNAME` | mDNS 注册主机名 | 系统 `hostname`；Docker 未设置时可能跳过 mDNS |
 | `LANROOM_ADVERTISE_IP` | 对外展示的局域网 IP（Bridge / 多网卡） | 自动检测网卡 |
 | `LANROOM_MAX_UPLOAD_MB` | 单文件上传上限（MiB），默认 `500`，封顶 `4096` | `500` |
 | `LANROOM_UPLOAD_DIR` | 上传文件目录 | 系统临时目录下的 `three-end-transmission-uploads` |
-
-### CLI 客户端
-
-| 变量 | 说明 |
-|------|------|
-| `LANROOM_HOST` | Hub 地址，见 [Hub 地址解析](#hub-地址解析顺序) |
 
 ### Docker Compose
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
 | `LANROOM_PORT` | Bridge 模式宿主机端口 | `8787` |
-| `LANROOM_HOSTNAME` | Host 模式 mDNS 名 | `myarch`（见 `docker-compose.host.yml`） |
 | `LANROOM_ADVERTISE_IP` | Bridge 模式固定展示 IP | 空 |
 
 ---
@@ -363,7 +225,6 @@ LANROOM_PORT=8888 docker compose up -d --build
 |------|-----|
 | 默认端口 | `8787`（`internal/config.DefaultPort`） |
 | WebSocket 单条消息 | 最大 **512 KB** |
-| HTTP `/api/send` 请求体 | 最大 **512 KB** |
 | 单文件上传 | 默认 **500 MiB**，可用 `LANROOM_MAX_UPLOAD_MB` 调整（最大 4096） |
 | 聊天历史 TTL | **10 分钟**（内存，重启丢失） |
 | 上传文件 TTL | **10 分钟**（后台定时清理） |
@@ -377,20 +238,15 @@ Hub 重启后：内存中的聊天历史与文件索引清空；Docker 卷内物
 
 ```
 Three_end_transmission/
-├── main.go                      # 入口：embed 静态资源、mDNS、HTTP
-├── cmd/lanroom-cli/main.go      # 命令行发送工具
+├── main.go                      # 入口：embed 静态资源、HTTP
 ├── Dockerfile
 ├── docker-compose.yml           # Bridge 部署
-├── docker-compose.host.yml      # Linux host 网络 + mDNS
-├── deploy/
-│   ├── setup-host-mdns.sh       # 宿主机一次性 mDNS 配置
-│   └── avahi/lanroom.service    # Avahi 备用服务发布
-├── scripts/docker-entrypoint.sh # 等 LAN IP 就绪再启动 Hub
+├── docker-compose.host.yml      # Linux host 网络
+├── scripts/docker-entrypoint.sh # 自动检测 LAN IP 后启动 Hub
 ├── internal/
 │   ├── config/                  # 默认端口等常量
 │   ├── hub/                     # WebSocket Hub、协议、平台解析
-│   ├── cli/                     # lanroom-cli 客户端逻辑
-│   ├── mdns/                    # mDNS 注册与发现
+│   ├── netutil/                 # 局域网 IP 检测
 │   └── server/                  # HTTP API、文件上传、网络信息
 ├── web/
 │   ├── index.html
@@ -469,9 +325,8 @@ Three_end_transmission/
 
 | 路径 | 方法 | 说明 |
 |------|------|------|
-| `/api/info` | GET | 连接信息（IP、mDNS、Android/iOS 推荐加入 URL） |
+| `/api/info` | GET | 连接信息（局域网 IP、加入 URL） |
 | `/api/qrcode` | GET | PNG 二维码，`?url=` 指定内容 |
-| `/api/send` | POST | CLI / 脚本发送（JSON） |
 | `/api/upload` | POST | `multipart/form-data`，字段 `file` |
 | `/api/files/{id}` | GET | 下载已上传文件 |
 
@@ -479,47 +334,14 @@ Three_end_transmission/
 
 ```json
 {
-  "hostname": "myarch",
-  "mdnsUrl": "http://myarch.local:8787",
   "joinUrl": "http://192.168.117.224:8787",
-  "androidJoinUrl": "http://192.168.117.224:8787",
-  "iosJoinUrl": "http://myarch.local:8787",
   "port": 8787,
   "localIps": ["192.168.117.224"],
-  "urls": ["http://192.168.117.224:8787", "http://myarch.local:8787"],
+  "urls": ["http://192.168.117.224:8787"],
   "clientCount": 2,
   "maxUploadMb": 500
 }
 ```
-
-#### `POST /api/send` 请求示例
-
-```json
-{
-  "name": "arch-pc",
-  "platform": "linux",
-  "payload": {
-    "kind": "text",
-    "content": "来自 CLI"
-  }
-}
-```
-
-发文件前先 `POST /api/upload` 获得 `fileId`，再：
-
-```json
-{
-  "name": "arch-pc",
-  "platform": "linux",
-  "payload": {
-    "kind": "file",
-    "fileId": "...",
-    "meta": { "name": "photo.png", "size": 12345, "mime": "image/png" }
-  }
-}
-```
-
-成功响应：`{ "status": "ok" }`
 
 #### `POST /api/upload` 响应示例
 
@@ -536,19 +358,16 @@ Three_end_transmission/
 
 ## 各平台说明
 
-| 平台 | `.local` 域名 | 推荐加入方式 |
-|------|---------------|--------------|
-| Linux / Windows（Avahi/Bonjour） | ✅ | `http://主机名.local:8787` |
-| Android | ❌ | IP 二维码或手动输入 IP |
-| iOS Safari | ✅ | `.local` 二维码或 IP |
-| iOS Chrome | ❌ | 改用 Safari 或输入 IP |
-| Linux CLI | ✅（Avahi） | `LANROOM_HOST=http://主机名.local:8787` |
+| 平台 | 推荐加入方式 |
+|------|--------------|
+| 全部平台 | 扫 IP 二维码或输入 `http://192.168.x.x:8787` |
+| 本机 | `http://127.0.0.1:8787` |
 
 **Android：** 输入栏固定底部，点 👥 打开设备抽屉；勿开「桌面版网站」。
 
 **iOS：** 可「添加到主屏幕」；剪贴板自动同步受限。
 
-**Linux 桌面：** 消息区隐藏原生滚动条（避免 GTK 白边）；📎 无效时用 `lanroom-cli`。
+**Linux 桌面：** 消息区隐藏原生滚动条（避免 GTK 白边）。
 
 ---
 
@@ -557,7 +376,7 @@ Three_end_transmission/
 ### 手机扫码后打不开？
 
 - 确认与 Hub **同一 WiFi**（非蜂窝数据）
-- Android 请扫 **IP 二维码**，不要用 `.local`
+- 扫 **IP 二维码**，或手动输入 `http://192.168.x.x:8787`
 - 关闭路由器 **AP 隔离 / 访客网络**
 - 防火墙放行 8787：`sudo ufw allow 8787` 或 `firewall-cmd --add-port=8787/tcp`
 - Hub 机器执行 `ss -tlnp | grep 8787` 确认监听
@@ -567,42 +386,18 @@ Three_end_transmission/
 - 说明用了 **Bridge 模式**，改用 `docker-compose.host.yml`，或直接用 Wi‑Fi IP 访问
 - 或设置 `LANROOM_ADVERTISE_IP=<宿主机 LAN IP>`
 
-### `myarch.local` 无法解析或时好时坏？
-
-**若已执行 `deploy/setup-host-mdns.sh` 并重建容器仍失败**，按下面排查：
-
-```bash
-systemctl status avahi-daemon
-ping -c 1 myarch.local
-resolvectl query myarch.local   # 看解析到的是 192.168.x.x 还是 172.x
-curl -s http://127.0.0.1:8787/api/info | jq '.mdnsUrl'
-```
-
-| 现象 | 处理 |
-|------|------|
-| `mdnsUrl` 为空 | 重建容器：`LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build`；查看日志应有 `mDNS active` |
-| 解析到 `172.x` | 旧镜像；重建。或设 `LANROOM_ADVERTISE_IP=192.168.x.x` |
-| Avahi 未运行 | `sudo systemctl enable --now avahi-daemon` |
-| 开着 Meta/Clash | `/etc/hosts` 备用：执行 `sudo ./deploy/sync-lanroom-hosts.sh`；或关代理 / 放行局域网 |
-| Arch 无法解析 | 安装 `nss-mdns`，`nsswitch.conf` 的 `hosts` 行加入 `mdns4_minimal [NOTFOUND=return]` |
-
-Host 模式需 `LANROOM_HOSTNAME` 与 `hostname` 一致。
-
 ### Windows 其他设备连不上？
 
 - WiFi 设为 **专用网络**
-- 防火墙允许 **8787** 或 `lanroom.exe`
+- 防火墙允许 **8787**
 
 ### Linux 上传文件失败？
 
 1. **页面上方是否「已连接」？** 未连接时 WebSocket 发不出去（HTTP 上传成功也不会出现在聊天里）。
-2. **dwm 等极简桌面：** 📎 可能弹不出文件选择框 → 用命令行：
-   ```bash
-   ./lanroom-cli -host http://127.0.0.1:8787 ./你的文件.pdf
-   ```
+2. **dwm 等极简桌面：** 📎 可能弹不出文件选择框，可换用带完整文件对话框的浏览器。
 3. **Docker 报 `cannot save file`：** 重建容器（入口脚本会 `chown` 上传目录）：
    ```bash
-   LANROOM_HOSTNAME=myarch sudo docker compose -f docker-compose.host.yml up -d --build
+   sudo docker compose -f docker-compose.host.yml up -d --build
    ```
 4. **单文件超过上限** 会被拒绝；默认 500 MiB，可在 Hub 环境变量调大（见下）。
 5. 刷新页面后重试；仍失败请看浏览器弹窗里的 **HTTP 状态码** 或 `sudo docker logs lanroom --tail 20`。
@@ -610,8 +405,7 @@ Host 模式需 `LANROOM_HOSTNAME` 与 `hostname` 一致。
 **调大上传上限（例如 2 GiB）：**
 
 ```bash
-LANROOM_MAX_UPLOAD_MB=2048 LANROOM_HOSTNAME=myarch \
-  sudo docker compose -f docker-compose.host.yml up -d --build
+LANROOM_MAX_UPLOAD_MB=2048 sudo docker compose -f docker-compose.host.yml up -d --build
 ```
 
 `curl -s http://127.0.0.1:8787/api/info | jq .maxUploadMb` 可查看当前生效值。
@@ -639,9 +433,6 @@ go test ./...
 
 # 启动开发 Hub
 go run . -port 8787
-
-# 构建 CLI
-go build -o lanroom-cli ./cmd/lanroom-cli
 ```
 
 修改 `web/` 下前端文件后需 **重启 Hub**（静态资源通过 `go:embed` 打入二进制）。

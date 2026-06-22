@@ -8,11 +8,6 @@ import (
 	"three-end-transmission/internal/netutil"
 )
 
-// AdvertiseLANIPs 供 mDNS Keeper 等后台任务获取局域网 IP（无 HTTP 请求上下文）。
-func AdvertiseLANIPs() []string {
-	return AdvertiseIPv4Addresses(nil)
-}
-
 // AdvertiseIPv4Addresses 返回应对外展示的局域网 IP（Docker 内会过滤 172.x 容器网段）。
 // 优先级：LANROOM_ADVERTISE_IP > 本机网卡 > HTTP Host 头中的 IP。
 func AdvertiseIPv4Addresses(r *http.Request) []string {

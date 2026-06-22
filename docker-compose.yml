@@ -12,9 +12,8 @@ services:
       - "${LANROOM_PORT:-8787}:8787"
     environment:
       LANROOM_UPLOAD_DIR: /data/uploads
-      # 可选：宿主机局域网 IP / mDNS 主机名（Bridge 模式下建议设置）
+      # 可选：Bridge 模式下指定宿主机局域网 IP
       LANROOM_ADVERTISE_IP: ${LANROOM_ADVERTISE_IP:-}
-      LANROOM_HOSTNAME: ${LANROOM_HOSTNAME:-}
       LANROOM_MAX_UPLOAD_MB: ${LANROOM_MAX_UPLOAD_MB:-}
     volumes:
       - lanroom-uploads:/data/uploads

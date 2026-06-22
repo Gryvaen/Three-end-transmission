@@ -636,10 +636,9 @@ a.file-card.is-downloading {
   margin-bottom: 4px;
 }
 
-.qr-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+.qr-single {
+  display: flex;
+  justify-content: center;
   margin-bottom: 16px;
 }
 
@@ -649,12 +648,6 @@ a.file-card.is-downloading {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 12px;
-}
-
-.qr-platform {
-  margin: 0 0 10px;
-  font-size: 0.9rem;
-  font-weight: 600;
 }
 
 .qr-image {
@@ -678,12 +671,6 @@ a.file-card.is-downloading {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 0.8rem;
-}
-
-@media (max-width: 520px) {
-  .qr-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 #close-info-btn {

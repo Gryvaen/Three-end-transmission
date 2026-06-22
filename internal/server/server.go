@@ -17,40 +17,23 @@ import (
 
 	"three-end-transmission/internal/config"
 	"three-end-transmission/internal/hub"
-	"three-end-transmission/internal/mdns"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/skip2/go-qrcode"
 )
 
 type Config struct {
-	Port            int
-	StaticFS        http.FileSystem
-	Mdns            *mdns.Registration
-	UploadDir       string
-	MaxUploadBytes  int64
+	Port           int
+	StaticFS       http.FileSystem
+	UploadDir      string
+	MaxUploadBytes int64
 }
 
 type Server struct {
 	cfg      Config
-	mu       sync.RWMutex
 	hub      *hub.Hub
 	upgrader websocket.Upgrader
 	files    sync.Map
-}
-
-// SetMdns 在启动后补注册 mDNS 时更新（例如 Wi-Fi 晚于容器就绪）。
-func (s *Server) SetMdns(reg *mdns.Registration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cfg.Mdns = reg
-}
-
-func (s *Server) mdnsReg() *mdns.Registration {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cfg.Mdns
 }
 
 type fileRecord struct {
@@ -62,16 +45,12 @@ type fileRecord struct {
 }
 
 type infoResponse struct {
-	Hostname       string   `json:"hostname"`
-	MdnsURL        string   `json:"mdnsUrl"`
-	JoinURL        string   `json:"joinUrl"`
-	AndroidJoinURL string   `json:"androidJoinUrl"`
-	IOSJoinURL     string   `json:"iosJoinUrl"`
-	Port           int      `json:"port"`
-	LocalIPs       []string `json:"localIps"`
-	URLs           []string `json:"urls"`
-	ClientCount    int      `json:"clientCount"`
-	MaxUploadMB    int      `json:"maxUploadMb"`
+	JoinURL     string   `json:"joinUrl"`
+	Port        int      `json:"port"`
+	LocalIPs    []string `json:"localIps"`
+	URLs        []string `json:"urls"`
+	ClientCount int      `json:"clientCount"`
+	MaxUploadMB int      `json:"maxUploadMb"`
 }
 
 func New(cfg Config) *Server {
@@ -126,7 +105,6 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/api/info", s.handleInfo)
 	mux.HandleFunc("/api/qrcode", s.handleQRCode)
-	mux.HandleFunc("/api/send", s.handleSend)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/files/", s.handleDownload)
 	mux.HandleFunc("/ws", s.handleWebSocket)
@@ -139,12 +117,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) joinURLs(lanIPs []string) []string {
-	urls := make([]string, 0, len(lanIPs)+1)
+	urls := make([]string, 0, len(lanIPs))
 	for _, ip := range lanIPs {
 		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.cfg.Port))
-	}
-	if s.mdnsReg() != nil {
-		urls = append(urls, s.mdnsReg().URL())
 	}
 	return urls
 }
@@ -152,9 +127,6 @@ func (s *Server) joinURLs(lanIPs []string) []string {
 func (s *Server) preferredJoinURL(lanIPs []string) string {
 	if len(lanIPs) > 0 {
 		return fmt.Sprintf("http://%s:%d", lanIPs[0], s.cfg.Port)
-	}
-	if s.mdnsReg() != nil {
-		return s.mdnsReg().URL()
 	}
 	return ""
 }
@@ -164,25 +136,13 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	urls := s.joinURLs(ips)
 	join := s.preferredJoinURL(ips)
 
-	reg := s.mdnsReg()
-	var mdnsURL string
-	if reg != nil {
-		mdnsURL = reg.URL()
-	}
-
 	resp := infoResponse{
-		Port:           s.cfg.Port,
-		LocalIPs:       ips,
-		URLs:           urls,
-		JoinURL:        join,
-		AndroidJoinURL: firstIPv4JoinURL(urls, join),
-		IOSJoinURL:     firstMdnsJoinURL(urls, mdnsURL, join),
-		ClientCount:    s.hub.ClientCount(),
-		MaxUploadMB:    int(s.cfg.MaxUploadBytes >> 20),
-	}
-	if reg != nil {
-		resp.Hostname = reg.Hostname()
-		resp.MdnsURL = mdnsURL
+		Port:        s.cfg.Port,
+		LocalIPs:    ips,
+		URLs:        urls,
+		JoinURL:     join,
+		ClientCount: s.hub.ClientCount(),
+		MaxUploadMB: int(s.cfg.MaxUploadBytes >> 20),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -214,41 +174,6 @@ func (s *Server) handleQRCode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(png)
-}
-
-func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req hub.SendRequest
-	r.Body = http.MaxBytesReader(w, r.Body, hub.MaxMessageSize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
-	}
-
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = "CLI"
-	}
-	platform := hub.ParsePlatform(req.Platform, "")
-	if req.Payload.Kind == "" {
-		http.Error(w, "missing payload.kind", http.StatusBadRequest)
-		return
-	}
-
-	device := hub.Device{
-		ID:       uuid.New().String(),
-		Name:     name,
-		Platform: platform,
-		IP:       ClientIP(r),
-	}
-	s.hub.BroadcastMessage(device, req.Payload)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

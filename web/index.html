@@ -67,20 +67,13 @@
     <dialog id="info-dialog">
       <div class="dialog-body">
         <h3>连接本聊天室</h3>
-        <p class="hint">Android 请扫左侧 <strong>局域网 IP</strong> 码；iOS 可扫右侧 <strong>.local</strong> 码（IP 变了也能用）。</p>
+        <p class="hint">同一 WiFi 下的设备请扫下方二维码，或手动输入局域网 IP 地址。</p>
         <div id="url-list" class="url-list"></div>
-        <div class="qr-grid">
+        <div class="qr-single">
           <div class="qr-card">
-            <p class="qr-platform">🤖 Android</p>
-            <img id="qr-android" class="qr-image" alt="Android 加入二维码" width="180" height="180" />
-            <p class="qr-caption">局域网 IP · 通用</p>
-            <p id="qr-android-url" class="qr-url"></p>
-          </div>
-          <div class="qr-card" id="qr-ios-card">
-            <p class="qr-platform">📱 iOS</p>
-            <img id="qr-ios" class="qr-image" alt="iOS 加入二维码" width="180" height="180" />
-            <p class="qr-caption">.local · 动态 IP 友好</p>
-            <p id="qr-ios-url" class="qr-url"></p>
+            <img id="qr-join" class="qr-image" alt="加入二维码" width="200" height="200" />
+            <p class="qr-caption">局域网 IP · 全平台通用</p>
+            <p id="qr-join-url" class="qr-url"></p>
           </div>
         </div>
         <button id="close-info-btn" type="button">关闭</button>
