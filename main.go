@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"three-end-transmission/internal/config"
 	"three-end-transmission/internal/server"
@@ -34,16 +35,20 @@ func main() {
 		Port:      *port,
 		StaticFS:  http.FS(static),
 		UploadDir: uploadDir,
+		PIN:       config.PIN(),
 	})
 	srv.StartFileCleanup()
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *port),
 		Handler: srv.Handler(),
+		// 只限制请求头；大文件上传时长不设上限
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
-		slog.Info("hub started", "addr", httpServer.Addr, "maxUploadMiB", config.MaxUploadMB())
+		slog.Info("hub started", "addr", httpServer.Addr, "maxUploadMiB", config.MaxUploadMB(),
+			"retention", config.Retention().String(), "pin", config.PIN() != "")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server stopped", "err", err)
 			os.Exit(1)

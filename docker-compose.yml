@@ -15,6 +15,10 @@ services:
       # 可选：Bridge 模式下指定宿主机局域网 IP
       LANROOM_ADVERTISE_IP: ${LANROOM_ADVERTISE_IP:-}
       LANROOM_MAX_UPLOAD_MB: ${LANROOM_MAX_UPLOAD_MB:-}
+      # 可选：消息与文件保留时长（如 30m、24h），默认 1h
+      LANROOM_RETENTION: ${LANROOM_RETENTION:-}
+      # 可选：房间口令，设置后新设备需输入口令才能加入
+      LANROOM_PIN: ${LANROOM_PIN:-}
     volumes:
       - lanroom-uploads:/data/uploads
     healthcheck:

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -33,4 +34,32 @@ func MaxUploadBytes() int64 {
 // MaxUploadMB 与 MaxUploadBytes 对应的 MiB 数（用于 API / 日志展示）。
 func MaxUploadMB() int {
 	return int(MaxUploadBytes() >> 20)
+}
+
+const (
+	// DefaultRetention 消息历史与上传文件的默认保留时长。
+	DefaultRetention = time.Hour
+	minRetention     = time.Minute
+)
+
+// Retention 返回消息与文件的保留时长。
+// 环境变量 LANROOM_RETENTION，Go duration 格式，例如 30m、24h。
+func Retention() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("LANROOM_RETENTION"))
+	if raw == "" {
+		return DefaultRetention
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return DefaultRetention
+	}
+	if d < minRetention {
+		return minRetention
+	}
+	return d
+}
+
+// PIN 返回房间口令（LANROOM_PIN），为空表示不启用口令。
+func PIN() string {
+	return strings.TrimSpace(os.Getenv("LANROOM_PIN"))
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -27,13 +26,19 @@ type Config struct {
 	StaticFS       http.FileSystem
 	UploadDir      string
 	MaxUploadBytes int64
+	// Retention 消息历史与上传文件的保留时长，0 表示用 config.Retention()。
+	Retention time.Duration
+	// PIN 房间口令，为空表示不启用。
+	PIN string
 }
 
 type Server struct {
 	cfg      Config
 	hub      *hub.Hub
+	auth     *authState
 	upgrader websocket.Upgrader
-	files    sync.Map
+	files    sync.Map // fileID -> fileRecord
+	uploads  sync.Map // uploadID -> *uploadSession
 }
 
 type fileRecord struct {
@@ -45,12 +50,15 @@ type fileRecord struct {
 }
 
 type infoResponse struct {
-	JoinURL     string   `json:"joinUrl"`
-	Port        int      `json:"port"`
-	LocalIPs    []string `json:"localIps"`
-	URLs        []string `json:"urls"`
-	ClientCount int      `json:"clientCount"`
-	MaxUploadMB int      `json:"maxUploadMb"`
+	JoinURL      string   `json:"joinUrl"`
+	PINRequired  bool     `json:"pinRequired"`
+	Authorized   bool     `json:"authorized"`
+	RetentionSec int64    `json:"retentionSec"`
+	Port         int      `json:"port"`
+	LocalIPs     []string `json:"localIps"`
+	URLs         []string `json:"urls"`
+	ClientCount  int      `json:"clientCount"`
+	MaxUploadMB  int      `json:"maxUploadMb"`
 }
 
 func New(cfg Config) *Server {
@@ -58,22 +66,35 @@ func New(cfg Config) *Server {
 		cfg.UploadDir = filepath.Join(os.TempDir(), "three-end-transmission-uploads")
 	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
+	removeOrphanUploads(cfg.UploadDir)
 
 	if cfg.MaxUploadBytes <= 0 {
 		cfg.MaxUploadBytes = config.MaxUploadBytes()
 	}
+	if cfg.Retention <= 0 {
+		cfg.Retention = config.Retention()
+	}
 
 	return &Server{
-		cfg: cfg,
-		hub: hub.New(),
+		cfg:  cfg,
+		hub:  hub.New(cfg.Retention),
+		auth: newAuthState(cfg.PIN),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin:     sameOrigin,
 		},
 	}
+}
+
+// sameOrigin 拒绝其他网站发起的 WebSocket（防止借用口令 cookie）；无 Origin 的非浏览器客户端放行。
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
 func (s *Server) StartFileCleanup() {
@@ -81,7 +102,8 @@ func (s *Server) StartFileCleanup() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			s.purgeExpiredFiles(hub.DefaultHistoryTTL)
+			s.purgeExpiredFiles(s.cfg.Retention)
+			s.auth.prune()
 		}
 	}()
 }
@@ -98,16 +120,22 @@ func (s *Server) purgeExpiredFiles(ttl time.Duration) {
 		}
 		return true
 	})
+	s.purgeStaleUploads(cutoff)
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	protect := s.auth.requireAuth
+
 	mux.HandleFunc("/api/info", s.handleInfo)
 	mux.HandleFunc("/api/qrcode", s.handleQRCode)
-	mux.HandleFunc("/api/upload", s.handleUpload)
-	mux.HandleFunc("/api/files/", s.handleDownload)
-	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/api/auth", s.auth.handleAuth)
+	mux.HandleFunc("/api/upload", protect(s.handleUpload))
+	mux.HandleFunc("/api/uploads", protect(s.handleUploadCreate))
+	mux.HandleFunc("/api/uploads/", protect(s.handleUploadSession))
+	mux.HandleFunc("/api/files/", protect(s.handleDownload))
+	mux.HandleFunc("/ws", protect(s.handleWebSocket))
 
 	if s.cfg.StaticFS != nil {
 		mux.Handle("/", http.FileServer(s.cfg.StaticFS))
@@ -135,17 +163,27 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	ips := AdvertiseIPv4Addresses(r)
 	urls := s.joinURLs(ips)
 	join := s.preferredJoinURL(ips)
+	authorized := s.auth.authorized(r)
+
+	// 已认证设备展示的二维码带上口令（URL fragment 不会发给服务器），扫码即可免输入
+	if join != "" && s.auth.enabled() && authorized {
+		join += "/#pin=" + url.QueryEscape(s.auth.pin)
+	}
 
 	resp := infoResponse{
-		Port:        s.cfg.Port,
-		LocalIPs:    ips,
-		URLs:        urls,
-		JoinURL:     join,
-		ClientCount: s.hub.ClientCount(),
-		MaxUploadMB: int(s.cfg.MaxUploadBytes >> 20),
+		Port:         s.cfg.Port,
+		LocalIPs:     ips,
+		URLs:         urls,
+		JoinURL:      join,
+		PINRequired:  s.auth.enabled(),
+		Authorized:   authorized,
+		RetentionSec: int64(s.cfg.Retention.Seconds()),
+		ClientCount:  s.hub.ClientCount(),
+		MaxUploadMB:  int(s.cfg.MaxUploadBytes >> 20),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
@@ -183,80 +221,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	platform := hub.ParsePlatform(r.URL.Query().Get("platform"), r.UserAgent())
+	q := r.URL.Query()
+	name := strings.TrimSpace(q.Get("name"))
+	platform := hub.ParsePlatform(q.Get("platform"), r.UserAgent())
 
-	client := hub.NewClient(s.hub, conn, name, platform, ClientIP(r))
+	client := hub.NewClient(s.hub, conn, q.Get("id"), name, platform, ClientIP(r))
 	s.hub.Register(client)
 
 	go client.WritePump()
 	go client.ReadPump()
-}
-
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	maxUpload := s.cfg.MaxUploadBytes
-	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
-
-	if err := r.ParseMultipartForm(maxUpload); err != nil {
-		http.Error(w, fmt.Sprintf("file too large (max %d MiB) or invalid form", maxUpload>>20), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "missing file field", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	id, err := randomID()
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	destPath := filepath.Join(s.cfg.UploadDir, id)
-	dest, err := os.Create(destPath)
-	if err != nil {
-		slog.Error("upload create file failed", "path", destPath, "err", err)
-		http.Error(w, "cannot save file", http.StatusInternalServerError)
-		return
-	}
-
-	written, err := io.Copy(dest, file)
-	_ = dest.Close()
-	if err != nil {
-		_ = os.Remove(destPath)
-		http.Error(w, "upload failed", http.StatusInternalServerError)
-		return
-	}
-
-	mime := header.Header.Get("Content-Type")
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-
-	record := fileRecord{
-		Name:      header.Filename,
-		Size:      written,
-		Mime:      mime,
-		Path:      destPath,
-		CreatedAt: time.Now(),
-	}
-	s.files.Store(id, record)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"fileId": id,
-		"name":   record.Name,
-		"size":   record.Size,
-		"mime":   record.Mime,
-	})
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -279,6 +252,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	record := raw.(fileRecord)
 
 	w.Header().Set("Content-Type", record.Mime)
+	// Content-Type 来自上传方，禁止浏览器嗅探成 HTML 执行
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// filename* 支持中文等非 ASCII 文件名
 	asciiName := strings.Map(func(r rune) rune {
 		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' {
