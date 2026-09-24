@@ -12,18 +12,11 @@ else
 	RUN_USER=""
 fi
 
-for cidr in $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}'); do
-	ip=${cidr%/*}
-	case "$ip" in
-		192.168.*|10.*)
-			if [ -z "${LANROOM_ADVERTISE_IP:-}" ]; then
-				export LANROOM_ADVERTISE_IP="$ip"
-			fi
-			echo "lanroom: LAN IP ${LANROOM_ADVERTISE_IP}"
-			break
-			;;
-	esac
-done
+# 不在这里固化 LANROOM_ADVERTISE_IP：host 网络下 Hub 会实时扫描网卡，
+# 启动时写死的 IP 在 DHCP 变更后会过期，导致连接信息出现两个地址。
+if [ -n "${LANROOM_ADVERTISE_IP:-}" ]; then
+	echo "lanroom: advertise IP ${LANROOM_ADVERTISE_IP}"
+fi
 
 if [ -n "$RUN_USER" ] && command -v su-exec >/dev/null; then
 	exec su-exec "$RUN_USER" /app/lanroom "$@"

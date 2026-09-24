@@ -9,15 +9,23 @@ import (
 )
 
 // AdvertiseIPv4Addresses 返回应对外展示的局域网 IP（Docker 内会过滤 172.x 容器网段）。
-// 优先级：LANROOM_ADVERTISE_IP > 本机网卡 > HTTP Host 头中的 IP。
+// 优先级：LANROOM_ADVERTISE_IP > 本机网卡 > HTTP Host 头中的 IP，取第一个非空来源，不合并。
 func AdvertiseIPv4Addresses(r *http.Request) []string {
-	var raw []string
-	raw = append(raw, netutil.EnvAdvertiseIPs()...)
-	raw = append(raw, netutil.CollectLANIPv4()...)
+	var host string
 	if r != nil {
-		raw = append(raw, ipsFromHTTPHost(r.Host)...)
+		host = r.Host
 	}
-	return netutil.FilterLANIPv4(raw)
+	return pickAdvertiseIPs(netutil.EnvAdvertiseIPs(), netutil.CollectLANIPv4(), ipsFromHTTPHost(host))
+}
+
+// pickAdvertiseIPs 按优先级返回第一个过滤后非空的来源；合并多个来源会让过期配置与实时网卡同时出现。
+func pickAdvertiseIPs(sources ...[]string) []string {
+	for _, src := range sources {
+		if ips := netutil.FilterLANIPv4(src); len(ips) > 0 {
+			return ips
+		}
+	}
+	return nil
 }
 
 func ipsFromHTTPHost(host string) []string {
