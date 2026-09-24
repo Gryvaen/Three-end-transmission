@@ -7,3 +7,4 @@ lanroom
 lanroom.exe
 *.exe
 uploads/
+.env
