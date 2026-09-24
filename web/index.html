@@ -17,6 +17,10 @@
         <p class="subtitle">局域网聊天式互传 · 浏览器打开即用</p>
         <label for="device-name">你的设备名称</label>
         <input id="device-name" type="text" placeholder="例如：小明的 Android" maxlength="32" />
+        <div id="pin-row" class="pin-row hidden">
+          <label for="pin-input">房间口令</label>
+          <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" placeholder="向 Hub 管理者索取" maxlength="64" />
+        </div>
         <button id="join-btn" type="button">进入聊天室</button>
         <button id="show-info-btn" type="button" class="link-btn">查看连接地址 / 二维码</button>
       </div>
@@ -37,7 +41,7 @@
         </div>
       </aside>
 
-      <main class="chat-main">
+      <main class="chat-main" id="chat-main">
         <header class="chat-header">
           <div class="chat-header-left">
             <button id="toggle-devices-btn" type="button" class="icon-btn header-devices-btn" title="在线设备">👥</button>
@@ -54,7 +58,15 @@
 
         <div id="messages" class="messages"></div>
 
+        <div id="drop-overlay" class="drop-overlay hidden">
+          <div class="drop-overlay-inner">松开发送到 <span id="drop-target">群聊</span></div>
+        </div>
+
         <footer class="composer">
+          <div id="target-bar" class="target-bar hidden">
+            <span>发送给：<strong id="target-name"></strong><span id="target-offline" class="target-offline hidden">（离线）</span></span>
+            <button id="target-clear" type="button" class="target-clear" title="改回群发">✕ 群发</button>
+          </div>
           <input id="file-input" type="file" multiple hidden />
           <button id="attach-btn" type="button" title="发送文件">📎</button>
           <textarea id="message-input" rows="1" placeholder="输入消息…"></textarea>
@@ -77,6 +89,15 @@
           </div>
         </div>
         <button id="close-info-btn" type="button">关闭</button>
+      </div>
+    </dialog>
+
+    <!-- 图片大图预览 -->
+    <dialog id="image-viewer" class="image-viewer">
+      <img id="image-viewer-img" alt="图片预览" />
+      <div class="image-viewer-actions">
+        <button id="image-viewer-download" type="button">下载</button>
+        <button id="image-viewer-close" type="button" class="secondary">关闭</button>
       </div>
     </dialog>
   </div>

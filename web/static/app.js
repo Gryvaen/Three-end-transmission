@@ -1,9 +1,12 @@
 /**
- * LanRoom 前端：WebSocket 群聊、文件上传、连接信息（二维码）。
- * 协议约定见 README —— presence 广播在线列表，message 广播聊天内容。
+ * LanRoom 前端：WebSocket 群聊 / 私信、断点续传上传、连接信息（二维码）、房间口令。
+ * 协议约定见 README —— presence 广播在线列表，message 投递聊天内容（to 为空即群发）。
  */
 
 const STORAGE_KEY = "lanroom-device-name";
+const DEVICE_ID_KEY = "lanroom-device-id";
+const UPLOAD_KEY_PREFIX = "lanroom-upload:";
+const UPLOAD_MAX_RETRIES = 10;
 const FILE_ID_RE = /^[a-f0-9]{32}$/;
 
 const COMPOSER_PLACEHOLDER = "输入消息…，可粘贴图片";
@@ -97,6 +100,19 @@ const els = {
   qrJoin: document.getElementById("qr-join"),
   qrJoinUrl: document.getElementById("qr-join-url"),
   copyChatBtn: document.getElementById("copy-chat-btn"),
+  pinRow: document.getElementById("pin-row"),
+  pinInput: document.getElementById("pin-input"),
+  chatMain: document.getElementById("chat-main"),
+  dropOverlay: document.getElementById("drop-overlay"),
+  dropTarget: document.getElementById("drop-target"),
+  targetBar: document.getElementById("target-bar"),
+  targetName: document.getElementById("target-name"),
+  targetOffline: document.getElementById("target-offline"),
+  targetClear: document.getElementById("target-clear"),
+  imageViewer: document.getElementById("image-viewer"),
+  imageViewerImg: document.getElementById("image-viewer-img"),
+  imageViewerDownload: document.getElementById("image-viewer-download"),
+  imageViewerClose: document.getElementById("image-viewer-close"),
 };
 
 let ws = null;
@@ -105,6 +121,57 @@ let chatName = null;
 let reconnectTimer = null;
 /** 当前会话消息列表，用于一键复制 */
 let chatLog = [];
+/** 进行中的上传，离开聊天室时取消 */
+const activeUploads = new Set();
+/** 私信目标 { id, name }；null 表示群发 */
+let sendTarget = null;
+/** 最近一次 presence 的在线设备 */
+let onlineUsers = [];
+
+// --- 本地存储（隐私模式下可能不可用） ---
+
+function storageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+function storageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 浏览器持久化的设备 ID：重连 / 刷新后保持不变，私信目标据此定位 */
+function getDeviceId() {
+  let id = storageGet(DEVICE_ID_KEY);
+  if (id && /^[0-9a-f-]{36}$/i.test(id)) return id;
+  if (crypto.randomUUID) {
+    id = crypto.randomUUID(); // 仅安全上下文可用
+  } else {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+    id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+  storageSet(DEVICE_ID_KEY, id);
+  return id;
+}
+
+const deviceId = getDeviceId();
 
 // --- 工具函数 ---
 
@@ -272,14 +339,22 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function setConnected(online) {
-  els.connStatus.textContent = online ? "已连接" : "未连接";
-  els.connStatus.classList.toggle("online", online);
-  els.connStatus.classList.toggle("offline", !online);
+function isOpen() {
+  return ws && ws.readyState === WebSocket.OPEN;
 }
 
-/** 渲染左侧在线设备列表（由 presence 消息驱动） */
+/** 更新连接状态；断线时禁用发送，避免消息"看似发出"实则丢失 */
+function setConnected(online) {
+  els.connStatus.textContent = online ? "已连接" : isInChat() ? "重连中…" : "未连接";
+  els.connStatus.classList.toggle("online", online);
+  els.connStatus.classList.toggle("offline", !online);
+  els.sendBtn.disabled = !online;
+  els.attachBtn.disabled = !online;
+}
+
+/** 渲染左侧在线设备列表（由 presence 消息驱动）；点击其他设备切换私信目标 */
 function renderDevices(users) {
+  onlineUsers = users;
   els.deviceList.innerHTML = "";
   els.onlineCount.textContent = String(users.length);
 
@@ -302,19 +377,54 @@ function renderDevices(users) {
 
     const platformKey = String(user.platform || "unknown");
     const icon = platformIcons[platformKey] || platformIcons.unknown;
+    const isSelf = user.id === deviceId;
 
     const li = document.createElement("li");
     li.className = "device-item";
+    if (!isSelf) {
+      li.classList.add("selectable");
+      li.dataset.deviceId = user.id;
+      li.dataset.deviceName = displayName;
+      li.title = "点击私信此设备";
+      li.classList.toggle("selected", sendTarget?.id === user.id);
+    }
     li.innerHTML = `
       <span class="device-icon">${icon}</span>
       <div>
-        <div class="device-name">${escapeHTML(displayName)}</div>
+        <div class="device-name">${escapeHTML(displayName)}${isSelf ? ' <span class="device-self">（本机）</span>' : ""}</div>
         <div class="device-ip">${escapeHTML(ip)}</div>
         <div class="device-platform">${escapeHTML(platformKey)}</div>
       </div>
     `;
     els.deviceList.appendChild(li);
   });
+
+  renderTargetBar();
+}
+
+/** 设置 / 取消私信目标 */
+function setSendTarget(target) {
+  sendTarget = target;
+  els.deviceList.querySelectorAll(".device-item.selectable").forEach((li) => {
+    li.classList.toggle("selected", li.dataset.deviceId === target?.id);
+  });
+  renderTargetBar();
+}
+
+function renderTargetBar() {
+  const target = sendTarget;
+  els.targetBar.classList.toggle("hidden", !target);
+  els.dropTarget.textContent = target ? target.name : "群聊";
+  if (!target) return;
+  const online = onlineUsers.some((u) => u.id === target.id);
+  els.targetName.textContent = target.name;
+  els.targetOffline.classList.toggle("hidden", online);
+  els.targetBar.classList.toggle("offline", !online);
+}
+
+/** 当前发送目标的 to 字段（群发返回 undefined） */
+function currentRecipients() {
+  return sendTarget ? [sendTarget.id] : undefined;
 }
 
 /** 防止聊天内容 XSS（用户昵称、文字消息） */
@@ -425,6 +535,12 @@ async function copyOneMessage(idx) {
 
   const payload = msg.payload || {};
   let ok = false;
+  if (payload.kind === "image" && !canCopyImages()) {
+    // http://局域网 IP 不是安全上下文，无法写入图片剪贴板：改为保存
+    const btn = els.messages.querySelector(`.msg-copy-btn[data-msg-idx="${idx}"]`);
+    await downloadFile(payload.fileId, payload.meta?.name || "image", btn);
+    return;
+  }
   if (payload.kind === "image") {
     ok = await copyImageToClipboard(payload.fileId);
     if (!ok) alert("图片复制失败，请检查权限或文件是否过期");
@@ -438,8 +554,23 @@ async function copyOneMessage(idx) {
   }
 }
 
+function canCopyImages() {
+  return window.isSecureContext && !!navigator.clipboard?.write && typeof ClipboardItem !== "undefined";
+}
+
+/** 私信标签文字：自己发出显示接收者，收到显示"私信我" */
+function privateLabel(msg, isSelf) {
+  if (!msg.to?.length) return "";
+  if (!isSelf) return "私信我";
+  const names = (msg.recipients || []).map((d) => {
+    const online = onlineUsers.find((u) => u.id === d.id);
+    return d.name || online?.name || "未知设备";
+  });
+  return `私信 → ${names.join("、") || "未知设备"}`;
+}
+
 /**
- * 将服务端广播的消息渲染到聊天区。
+ * 将服务端投递的消息渲染到聊天区。
  * payload.kind: text | image | file
  */
 function appendMessage(msg, isSelf) {
@@ -447,7 +578,8 @@ function appendMessage(msg, isSelf) {
   chatLog.push(msg);
 
   const wrapper = document.createElement("div");
-  wrapper.className = `msg${isSelf ? " self" : ""}`;
+  const privateTag = privateLabel(msg, isSelf);
+  wrapper.className = `msg${isSelf ? " self" : ""}${privateTag ? " private" : ""}`;
   wrapper.dataset.msgIdx = String(logIdx);
 
   const fromName = msg.from?.name || "未知设备";
@@ -455,13 +587,17 @@ function appendMessage(msg, isSelf) {
 
   let body = "";
   const payload = msg.payload || {};
+  const saveInstead = payload.kind === "image" && !canCopyImages();
+  const copyLabel = saveInstead ? "保存" : "复制";
+  const copyTitle = saveInstead ? "保存图片" : "复制此条";
 
   if (payload.kind === "text") {
     body = `<div class="msg-bubble">${escapeHTML(payload.content || "")}</div>`;
   } else if (payload.kind === "image") {
     const imgUrl = safeFileURL(payload.fileId);
     body = imgUrl
-      ? `<img class="msg-image" src="${escapeAttr(imgUrl)}" alt="图片" />`
+      ? `<img class="msg-image" src="${escapeAttr(imgUrl)}" alt="图片" loading="lazy"
+           data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(payload.meta?.name || "image")}" />`
       : `<div class="msg-bubble">[图片不可用]</div>`;
   } else if (payload.kind === "file") {
     const name = payload.meta?.name || "文件";
@@ -470,7 +606,7 @@ function appendMessage(msg, isSelf) {
     const fileUrl = safeFileURL(payload.fileId);
     body = fileUrl
       ? `
-      <div class="msg-bubble">
+      <div class="msg-bubble file-bubble">
         <a class="file-card file-download" href="${escapeAttr(fileUrl)}" download="${escapeAttr(name)}"
            data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}">
           <span class="file-icon" aria-hidden="true">📎</span>
@@ -488,13 +624,18 @@ function appendMessage(msg, isSelf) {
 
   wrapper.innerHTML = `
     <div class="msg-meta">
-      <span>${escapeHTML(fromName)} · ${time}</span>
-      <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="复制此条">复制</button>
+      <span>${escapeHTML(fromName)} · ${time}${privateTag ? ` · <span class="msg-private-tag">${escapeHTML(privateTag)}</span>` : ""}</span>
+      <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="${copyTitle}">${copyLabel}</button>
     </div>
     ${body}
   `;
 
-  els.messages.appendChild(wrapper);
+  // 上传中的占位条目始终留在底部，新消息插在它们之前
+  els.messages.insertBefore(wrapper, els.messages.querySelector(".upload-pending"));
+  scrollToBottom();
+}
+
+function scrollToBottom() {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
@@ -549,7 +690,7 @@ function connect(name) {
   }
 
   const platform = detectPlatform();
-  const params = new URLSearchParams({ name, platform });
+  const params = new URLSearchParams({ name, platform, id: deviceId });
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${protocol}://${location.host}/ws?${params}`);
 
@@ -562,11 +703,20 @@ function connect(name) {
   };
 
   ws.onclose = () => {
-    setConnected(false);
     ws = null;
+    setConnected(false);
     if (!isInChat() || !chatName) return;
-    reconnectTimer = setTimeout(() => {
-      if (isInChat() && chatName) connect(chatName);
+    reconnectTimer = setTimeout(async () => {
+      if (!isInChat() || !chatName) return;
+      // 握手被 401 拒绝时浏览器只给出 1006：查一下是否需要口令（Hub 重启后会话失效）
+      const info = await loadConnectionInfo().catch(() => null);
+      if (info?.pinRequired && !info.authorized) {
+        leaveChat();
+        showPinRow(true);
+        alert("需要重新输入房间口令");
+        return;
+      }
+      connect(chatName);
     }, 2000);
   };
 
@@ -593,7 +743,8 @@ function connect(name) {
     }
 
     if (data.type === "history") {
-      els.messages.innerHTML = "";
+      // 保留正在上传的进度卡片（重连时上传仍在继续）
+      els.messages.querySelectorAll(".msg:not(.upload-pending)").forEach((el) => el.remove());
       chatLog = [];
       (data.messages || []).forEach((msg) => {
         const isSelf = selfDevice && msg.from?.id === selfDevice.id;
@@ -609,60 +760,251 @@ function connect(name) {
   };
 }
 
-/** 向服务端发送聊天消息（服务端会广播给所有在线客户端） */
-function sendWS(payload) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: "message", payload }));
+/** 发送聊天消息；to 为空表示群发。未连接时返回 false */
+function sendWS(payload, to) {
+  if (!isOpen()) return false;
+  const msg = { type: "message", payload };
+  if (to?.length) msg.to = to;
+  ws.send(JSON.stringify(msg));
+  return true;
 }
 
 async function sendText() {
   const text = els.messageInput.value.trim();
   if (!text) return;
-  sendWS({ kind: "text", content: text });
-  els.messageInput.value = "";
+  // 只有真正发出去才清空输入框，断线时保留草稿
+  if (sendWS({ kind: "text", content: text }, currentRecipients())) {
+    els.messageInput.value = "";
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 等待 WebSocket 重连（上传耗时较长，结束时可能恰好在重连） */
+async function waitForOpen(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!isOpen() && Date.now() < deadline && isInChat()) {
+    await sleep(500);
+  }
+  return isOpen();
+}
+
+class UploadError extends Error {
+  constructor(message, { retryable = false, status = 0 } = {}) {
+    super(message);
+    this.retryable = retryable;
+    this.status = status;
+  }
 }
 
 /**
- * 文件/图片发送流程：先 HTTP 上传到 Hub，再通过 WebSocket 广播 fileId。
+ * XMLHttpRequest 封装：fetch 不支持上传进度。
+ * 返回 { status, data }；网络错误抛出可重试的 UploadError。
+ */
+function xhrRequest(method, url, { body, json, onUploadProgress, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    if (json !== undefined) xhr.setRequestHeader("Content-Type", "application/json");
+    if (onUploadProgress) xhr.upload.onprogress = (e) => onUploadProgress(e.loaded);
+
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const done = () => signal?.removeEventListener("abort", onAbort);
+
+    xhr.onload = () => {
+      done();
+      let data = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        data = xhr.responseText;
+      }
+      resolve({ status: xhr.status, data });
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new UploadError("网络中断", { retryable: true }));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(new DOMException("已取消", "AbortError"));
+    };
+    xhr.send(json !== undefined ? JSON.stringify(json) : body);
+  });
+}
+
+function httpError(res, fallback) {
+  const detail = typeof res.data === "string" ? res.data.trim().slice(0, 200) : "";
+  if (res.status === 401) return new UploadError("需要房间口令，请刷新页面重新进入", { status: 401 });
+  // 5xx / 400（分片中途断开）可重试；413、404 等不可重试
+  const retryable = res.status >= 500 || res.status === 400 || res.status === 0;
+  return new UploadError(`${fallback} (HTTP ${res.status})${detail ? `：${detail}` : ""}`, {
+    retryable,
+    status: res.status,
+  });
+}
+
+/** 创建或恢复上传会话，返回 { uploadId, offset, chunkSize, file? } */
+async function openUploadSession(file, storeKey, signal) {
+  const savedId = storageGet(storeKey);
+  if (savedId && FILE_ID_RE.test(savedId)) {
+    const res = await xhrRequest("GET", `/api/uploads/${savedId}`, { signal });
+    if (res.status === 200 && res.data?.uploadId) return res.data;
+    storageRemove(storeKey); // 已过期或被清理，重新开始
+  }
+
+  const res = await xhrRequest("POST", "/api/uploads", {
+    json: { name: file.name, size: file.size, mime: file.type },
+    signal,
+  });
+  if (res.status !== 201) throw httpError(res, "创建上传失败");
+  if (!res.data.file) storageSet(storeKey, res.data.uploadId);
+  return res.data;
+}
+
+/**
+ * 断点续传：按分片 PUT，网络中断后指数退避并向服务端查询 offset 继续。
+ * 刷新页面后重新选择同一文件，会从上次的进度继续。
+ * onProgress(uploadedBytes)；返回 { fileId, name, size, mime }。
+ */
+async function uploadResumable(file, onProgress, signal) {
+  const storeKey = `${UPLOAD_KEY_PREFIX}${file.name}|${file.size}|${file.lastModified}`;
+  let session = await openUploadSession(file, storeKey, signal);
+  const { uploadId, chunkSize } = session;
+  let offset = session.offset || 0;
+  let failures = 0;
+
+  try {
+    while (!session.file) {
+      onProgress(offset);
+      const end = Math.min(offset + chunkSize, file.size);
+      try {
+        const res = await xhrRequest("PUT", `/api/uploads/${uploadId}?offset=${offset}`, {
+          body: file.slice(offset, end),
+          onUploadProgress: (loaded) => onProgress(offset + loaded),
+          signal,
+        });
+        if (res.status === 200 || res.status === 409) {
+          // 409：服务端进度与本地不一致，以服务端为准
+          session = res.data;
+          offset = session.offset;
+          if (res.status === 200) failures = 0;
+          continue;
+        }
+        throw httpError(res, "上传失败");
+      } catch (err) {
+        if (err.name === "AbortError" || !err.retryable) throw err;
+        failures++;
+        if (failures > UPLOAD_MAX_RETRIES) throw new UploadError(`${err.message}，重试 ${UPLOAD_MAX_RETRIES} 次后放弃`);
+        onProgress(offset, `网络中断，${Math.min(2 ** (failures - 1), 30)}s 后重试（${failures}/${UPLOAD_MAX_RETRIES}）`);
+        await sleep(Math.min(1000 * 2 ** (failures - 1), 30000));
+        if (signal.aborted) throw new DOMException("已取消", "AbortError");
+        // 断线期间可能已写入部分数据：向服务端确认实际进度
+        const state = await xhrRequest("GET", `/api/uploads/${uploadId}`, { signal }).catch((e) => {
+          if (e.name === "AbortError") throw e;
+          return null;
+        });
+        if (state?.status === 200) {
+          session = state.data;
+          offset = session.offset;
+        } else if (state && state.status !== 0) {
+          throw httpError(state, "上传会话已失效");
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      storageRemove(storeKey);
+      xhrRequest("DELETE", `/api/uploads/${uploadId}`).catch(() => {});
+    } else if (!err.retryable && err.status && err.status !== 401) {
+      // 会话失效、超过上限等：丢弃续传记录；多次重试失败或需口令时保留，之后可续传
+      storageRemove(storeKey);
+    }
+    throw err;
+  }
+
+  storageRemove(storeKey);
+  onProgress(file.size);
+  return session.file;
+}
+
+/** 聊天区中的"上传中"占位条目 */
+function createUploadCard(file, targetName) {
+  const el = document.createElement("div");
+  el.className = `msg self upload-pending${targetName ? " private" : ""}`;
+  el.innerHTML = `
+    <div class="msg-meta"><span>上传中${targetName ? ` · <span class="msg-private-tag">私信 → ${escapeHTML(targetName)}</span>` : ""}</span></div>
+    <div class="msg-bubble upload-card">
+      <div class="upload-name">📎 ${escapeHTML(file.name)}</div>
+      <div class="upload-progress"><div class="upload-progress-bar"></div></div>
+      <div class="upload-status">
+        <span class="upload-text">准备中…</span>
+        <button type="button" class="upload-cancel">取消</button>
+      </div>
+    </div>`;
+  els.messages.appendChild(el);
+  scrollToBottom();
+
+  const bar = el.querySelector(".upload-progress-bar");
+  const text = el.querySelector(".upload-text");
+  let lastBytes = 0;
+  let lastTime = performance.now();
+  let speed = 0;
+
+  return {
+    el,
+    cancelBtn: el.querySelector(".upload-cancel"),
+    update(bytes, note) {
+      const pct = file.size ? Math.min(100, (bytes / file.size) * 100) : 100;
+      bar.style.width = `${pct.toFixed(1)}%`;
+      const now = performance.now();
+      if (now - lastTime >= 500) {
+        speed = ((bytes - lastBytes) / (now - lastTime)) * 1000;
+        lastBytes = bytes;
+        lastTime = now;
+      }
+      text.textContent =
+        note || `${pct.toFixed(0)}% · ${formatSize(bytes)} / ${formatSize(file.size)}${speed > 0 ? ` · ${formatSize(speed)}/s` : ""}`;
+    },
+    remove() {
+      el.remove();
+    },
+  };
+}
+
+/**
+ * 文件/图片发送流程：分片上传到 Hub（可断点续传），再通过 WebSocket 投递 fileId。
  * 其他设备收到消息后，从 /api/files/{id} 下载。
  */
 async function uploadAndSend(file) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!isInChat()) return; // 已离开聊天室：批量上传的剩余文件直接跳过
+  if (!isOpen()) {
     alert("未连接聊天室，无法发送文件。请确认顶部显示「已连接」后再试。");
     return;
   }
 
-  const form = new FormData();
-  form.append("file", file);
-
-  let resp;
-  try {
-    resp = await fetch("/api/upload", { method: "POST", body: form });
-  } catch (err) {
-    alert(`上传失败：${err.message}`);
-    return;
-  }
-
-  if (!resp.ok) {
-    const detail = (await resp.text()).trim().slice(0, 200);
-    alert(`上传失败 (HTTP ${resp.status})${detail ? `：${detail}` : ""}`);
-    return;
-  }
+  // 目标在上传开始时确定，上传过程中切换目标不影响本文件
+  const to = currentRecipients();
+  const card = createUploadCard(file, sendTarget?.name);
+  const controller = new AbortController();
+  card.cancelBtn.addEventListener("click", () => controller.abort(), { once: true });
+  activeUploads.add(controller);
 
   let result;
   try {
-    result = await resp.json();
-  } catch {
-    alert("上传失败：服务器返回无效数据");
+    result = await uploadResumable(file, (bytes, note) => card.update(bytes, note), controller.signal);
+  } catch (err) {
+    if (err.name !== "AbortError") alert(`「${file.name}」上传失败：${err.message}`);
     return;
+  } finally {
+    activeUploads.delete(controller);
+    card.remove();
   }
 
-  if (!result.fileId) {
-    alert("上传失败：未获得 fileId");
-    return;
-  }
-
-  sendWS({
+  const payload = {
     kind: result.mime?.startsWith("image/") ? "image" : "file",
     fileId: result.fileId,
     meta: {
@@ -670,13 +1012,16 @@ async function uploadAndSend(file) {
       size: result.size,
       mime: result.mime,
     },
-  });
+  };
+  if (!sendWS(payload, to) && !((await waitForOpen(30000)) && sendWS(payload, to))) {
+    alert(`「${file.name}」已上传，但聊天室连接中断，未能发送。请在恢复连接后重新发送该文件。`);
+  }
 }
 
 // --- 连接信息 / 二维码 ---
 
 async function loadConnectionInfo() {
-  const resp = await fetch("/api/info");
+  const resp = await fetch("/api/info", { cache: "no-store" });
   if (!resp.ok) return null;
   return resp.json();
 }
@@ -686,9 +1031,12 @@ function isLANIPv4Host(host) {
   return /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) || /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
-/** 加入地址：优先当前页已是局域网 IP，否则用服务端 joinUrl */
+/** 加入地址：优先当前页已是局域网 IP，否则用服务端 joinUrl；保留服务端附带的口令 fragment */
 function pickJoinURL(info) {
-  if (isLANIPv4Host(location.hostname)) return location.origin;
+  if (isLANIPv4Host(location.hostname)) {
+    const hash = info.joinUrl?.includes("#") ? info.joinUrl.slice(info.joinUrl.indexOf("#")) : "";
+    return `${location.origin}/${hash}`;
+  }
   return info.joinUrl || location.href;
 }
 
@@ -724,12 +1072,13 @@ async function showInfoDialog() {
 
 function enterChat(name) {
   chatName = name;
-  localStorage.setItem(STORAGE_KEY, name);
+  storageSet(STORAGE_KEY, name);
   document.body.classList.add("in-chat");
   document.documentElement.classList.add("in-chat");
   els.joinScreen.classList.add("hidden");
   els.chatScreen.classList.remove("hidden");
   els.selfLabel.textContent = `当前身份：${name}`;
+  setConnected(false);
   setDevicesPanel(false);
   initMobileViewportFix();
   connect(name);
@@ -748,6 +1097,8 @@ function leaveChat() {
   chatName = null;
   selfDevice = null;
   chatLog = [];
+  setSendTarget(null);
+  activeUploads.forEach((c) => c.abort());
   document.body.classList.remove("in-chat");
   document.documentElement.classList.remove("in-chat");
   document.documentElement.style.removeProperty("--composer-offset");
@@ -784,10 +1135,35 @@ async function handleComposerPaste(e) {
 
 // --- 事件绑定 ---
 
-els.joinBtn.addEventListener("click", () => {
+els.joinBtn.addEventListener("click", async () => {
   const name = els.deviceName.value.trim() || defaultDeviceName();
+  if (!els.pinRow.classList.contains("hidden")) {
+    els.joinBtn.disabled = true;
+    const result = await submitPIN(els.pinInput.value.trim());
+    els.joinBtn.disabled = false;
+    if (!result.ok) {
+      alert(result.message);
+      els.pinInput.focus();
+      return;
+    }
+    showPinRow(false);
+  }
   enterChat(name);
 });
+
+els.pinInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.joinBtn.click();
+});
+
+els.deviceList.addEventListener("click", (e) => {
+  const li = e.target.closest(".device-item.selectable");
+  if (!li) return;
+  const same = sendTarget?.id === li.dataset.deviceId;
+  setSendTarget(same ? null : { id: li.dataset.deviceId, name: li.dataset.deviceName });
+  setDevicesPanel(false);
+  if (!same) els.messageInput.focus();
+});
+els.targetClear.addEventListener("click", () => setSendTarget(null));
 
 for (const btn of [els.showInfoBtn, els.infoPanelBtn]) {
   btn?.addEventListener("click", showInfoDialog);
@@ -805,6 +1181,12 @@ els.messages.addEventListener("click", (e) => {
   if (copyBtn) {
     e.preventDefault();
     copyOneMessage(Number(copyBtn.dataset.msgIdx));
+    return;
+  }
+
+  const img = e.target.closest(".msg-image");
+  if (img) {
+    openImageViewer(img);
     return;
   }
 
@@ -837,15 +1219,110 @@ els.fileInput.addEventListener("change", async () => {
   }
 });
 
+// --- 拖拽上传 ---
+
+let dragDepth = 0;
+
+function isFileDrag(e) {
+  return [...(e.dataTransfer?.types || [])].includes("Files");
+}
+
+els.chatMain.addEventListener("dragenter", (e) => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth++; // 子元素间移动会触发成对的 enter/leave，用计数避免闪烁
+  els.dropOverlay.classList.remove("hidden");
+});
+els.chatMain.addEventListener("dragover", (e) => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = isOpen() ? "copy" : "none";
+});
+els.chatMain.addEventListener("dragleave", () => {
+  if (dragDepth === 0) return;
+  dragDepth--;
+  if (dragDepth === 0) els.dropOverlay.classList.add("hidden");
+});
+els.chatMain.addEventListener("drop", async (e) => {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  els.dropOverlay.classList.add("hidden");
+  for (const file of [...e.dataTransfer.files]) {
+    await uploadAndSend(file);
+  }
+});
+
+// --- 图片预览 ---
+
+function openImageViewer(img) {
+  els.imageViewerImg.src = img.src;
+  els.imageViewerDownload.dataset.fileId = img.dataset.fileId || "";
+  els.imageViewerDownload.dataset.fileName = img.dataset.fileName || "image";
+  els.imageViewer.showModal();
+}
+
+els.imageViewerClose.addEventListener("click", () => els.imageViewer.close());
+els.imageViewerDownload.addEventListener("click", () => {
+  const { fileId, fileName } = els.imageViewerDownload.dataset;
+  downloadFile(fileId, fileName, els.imageViewerDownload);
+});
+// 点击图片以外的区域关闭（Esc 由 <dialog> 原生处理）
+els.imageViewer.addEventListener("click", (e) => {
+  if (e.target === els.imageViewer) els.imageViewer.close();
+});
+els.imageViewer.addEventListener("close", () => {
+  els.imageViewerImg.removeAttribute("src");
+});
+
+// --- 房间口令 ---
+
+function showPinRow(show) {
+  els.pinRow.classList.toggle("hidden", !show);
+  if (show) els.pinInput.value = "";
+}
+
+/** 提交口令，成功后服务端下发会话 cookie */
+async function submitPIN(pin) {
+  if (!pin) return { ok: false, message: "请输入房间口令" };
+  try {
+    const resp = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    if (resp.ok) return { ok: true };
+    if (resp.status === 429) return { ok: false, message: "尝试次数过多，请 1 分钟后再试" };
+    return { ok: false, message: "口令错误" };
+  } catch (err) {
+    return { ok: false, message: `无法连接 Hub：${err.message}` };
+  }
+}
+
+/** 扫码链接里的 #pin=xxx 自动认证，然后从地址栏移除 */
+async function consumePINFromHash() {
+  const m = location.hash.match(/(?:^#|&)pin=([^&]*)/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  await submitPIN(decodeURIComponent(m[1]));
+}
+
 // --- 初始化 ---
 
 initPlatformUI();
 initAutoHideScrollbars();
 
-const savedName = localStorage.getItem(STORAGE_KEY);
+const savedName = storageGet(STORAGE_KEY);
 els.deviceName.value = savedName || defaultDeviceName();
 
-// 带 ?auto=1 时跳过进入页（方便手机扫码后直接进聊天）
-if (location.search.includes("auto=1") && savedName) {
-  enterChat(savedName);
-}
+(async () => {
+  await consumePINFromHash();
+  const info = await loadConnectionInfo().catch(() => null);
+  const needPIN = !!(info?.pinRequired && !info.authorized);
+  showPinRow(needPIN);
+
+  // 带 ?auto=1 时跳过进入页（方便手机扫码后直接进聊天）
+  if (location.search.includes("auto=1") && savedName && !needPIN) {
+    enterChat(savedName);
+  }
+})();
