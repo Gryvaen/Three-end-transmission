@@ -2,7 +2,7 @@
 
 Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / iOS 只需 **打开浏览器** 即可互传文字、图片与文件，无需安装 App。
 
-以 **局域网 IP** 为唯一加入方式：IP 二维码、10 分钟聊天历史、各平台定制 UI。
+以 **局域网 IP** 为唯一加入方式：IP 二维码、大文件断点续传、指定设备私信、可选房间口令、各平台定制 UI。
 
 ---
 
@@ -31,10 +31,14 @@ Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / i
 |------|------|
 | WebSocket 群聊 | 文字消息实时广播 |
 | 在线设备列表 | 显示昵称、IP、平台图标 |
-| 图片 / 文件 | 先 HTTP 上传，再 WebSocket 广播 `fileId` |
+| 图片 / 文件 | 分片上传到 Hub（显示进度、速度，可取消），再通过 WebSocket 发送 `fileId` |
+| 断点续传 | Wi‑Fi 抖动自动重试并从断点继续；刷新页面后重新选择同一文件也能续传 |
+| 指定设备发送 | 点击在线设备即可私信，文字 / 文件 / 粘贴 / 拖拽都只发给对方 |
+| 房间口令 | 设置 `LANROOM_PIN` 后需输入口令；Hub 页二维码自带口令，扫码即进 |
+| 拖拽上传 / 大图预览 | 桌面端把文件拖进窗口即发送；点击图片全屏查看 |
 | IP 二维码 | 全平台通用，扫 `http://192.168.x.x:8787` 加入 |
-| 断线重连 | 聊天页内自动重连（离开聊天室不重连） |
-| 10 分钟历史 | 新设备加入可回看近期消息 |
+| 断线重连 | 聊天页内自动重连；设备 ID 保存在浏览器，刷新后仍是同一台设备 |
+| 聊天历史 | 默认保留 1 小时（`LANROOM_RETENTION`），新设备加入可回看群聊 |
 | 平台 UI | `platform.css` 按 Android / iOS / Windows / Linux / macOS 切换主题 |
 
 ---
@@ -64,7 +68,8 @@ flowchart LR
 1. 打开页面 → WebSocket 连接 `/ws?name=...&platform=...`
 2. 服务端推送 `welcome`（本设备 ID）、`history`（近期消息）、`presence`（在线列表）
 3. 发文字：WebSocket 发送 `{ type: "message", payload: { kind: "text", ... } }`
-4. 发文件：先 `POST /api/upload` 获得 `fileId`，再 WebSocket 广播 `kind: "file"` 或 `"image"`
+4. 发文件：`POST /api/uploads` 创建上传会话 → 分片 `PUT` → 完成后获得 `fileId`，再通过 WebSocket 发送 `kind: "file"` 或 `"image"`
+5. 私信：消息带 `to: [设备ID]`，服务端只投递给对方和发送者本人
 
 ---
 
@@ -196,7 +201,14 @@ LANROOM_PORT=8888 docker compose up -d --build
 
 ### Docker 数据
 
-上传文件保存在卷 `lanroom-uploads`（路径 `/data/uploads`）。**聊天历史在内存中**，Hub 重启后清空；文件记录在 TTL 过期后清理（见 [限制与约定](#限制与约定)）。
+上传文件保存在卷 `lanroom-uploads`（路径 `/data/uploads`）。**聊天历史在内存中**，Hub 重启后清空，同时清理上次遗留的上传文件；运行期间文件在保留时长到期后清理（见 [限制与约定](#限制与约定)）。
+
+启用房间口令：
+
+```bash
+echo "LANROOM_PIN=2468" >> .env   # docker compose 自动读取项目目录下的 .env
+docker compose -f docker-compose.host.yml up -d
+```
 
 ---
 
@@ -206,8 +218,10 @@ LANROOM_PORT=8888 docker compose up -d --build
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `LANROOM_ADVERTISE_IP` | 对外展示的局域网 IP（Bridge / 多网卡） | 自动检测网卡 |
+| `LANROOM_ADVERTISE_IP` | 对外展示的局域网 IP（Bridge / 多网卡），设置后**只**展示这些 IP | 自动检测网卡 |
 | `LANROOM_MAX_UPLOAD_MB` | 单文件上传上限（MiB），默认 `500`，封顶 `4096` | `500` |
+| `LANROOM_RETENTION` | 消息历史与上传文件保留时长（Go duration，如 `30m`、`24h`，最短 `1m`） | `1h` |
+| `LANROOM_PIN` | 房间口令；为空表示不启用 | 空 |
 | `LANROOM_UPLOAD_DIR` | 上传文件目录 | 系统临时目录下的 `three-end-transmission-uploads` |
 
 ### Docker Compose
@@ -216,6 +230,7 @@ LANROOM_PORT=8888 docker compose up -d --build
 |------|------|------|
 | `LANROOM_PORT` | Bridge 模式宿主机端口 | `8787` |
 | `LANROOM_ADVERTISE_IP` | Bridge 模式固定展示 IP | 空 |
+| `LANROOM_RETENTION` / `LANROOM_PIN` / `LANROOM_MAX_UPLOAD_MB` | 透传给 Hub，含义同上 | 空 |
 
 ---
 
@@ -226,11 +241,16 @@ LANROOM_PORT=8888 docker compose up -d --build
 | 默认端口 | `8787`（`internal/config.DefaultPort`） |
 | WebSocket 单条消息 | 最大 **512 KB** |
 | 单文件上传 | 默认 **500 MiB**，可用 `LANROOM_MAX_UPLOAD_MB` 调整（最大 4096） |
-| 聊天历史 TTL | **10 分钟**（内存，重启丢失） |
-| 上传文件 TTL | **10 分钟**（后台定时清理） |
+| 聊天历史保留 | 默认 **1 小时**（`LANROOM_RETENTION`，内存，重启丢失） |
+| 上传文件保留 | 与聊天历史相同（后台每 5 分钟清理；未完成的续传会话超过保留时长无进展也会清理） |
+| 上传分片 | **8 MiB** / 片 |
+| 私信接收者 | 单条最多 16 台设备 |
+| 口令会话 | 30 天（内存，Hub 重启后需重新输入）；同一 IP 每分钟最多错 5 次 |
 | 文件 ID | 32 位十六进制 |
 
-Hub 重启后：内存中的聊天历史与文件索引清空；Docker 卷内物理文件可能残留至 TTL 清理。
+Hub 重启后：内存中的聊天历史、文件索引与口令会话清空，上传目录中本程序留下的文件（32 位十六进制文件名）会在启动时删除。
+
+**安全说明：** 局域网内明文 HTTP。私信的隔离依靠服务端投递控制与 128 位随机文件 ID；如同一 Wi‑Fi 下有不信任的人，请启用 `LANROOM_PIN`。
 
 ---
 
@@ -242,12 +262,12 @@ Three_end_transmission/
 ├── Dockerfile
 ├── docker-compose.yml           # Bridge 部署
 ├── docker-compose.host.yml      # Linux host 网络
-├── scripts/docker-entrypoint.sh # 自动检测 LAN IP 后启动 Hub
+├── scripts/docker-entrypoint.sh # 修正卷权限后降权启动 Hub
 ├── internal/
 │   ├── config/                  # 默认端口等常量
 │   ├── hub/                     # WebSocket Hub、协议、平台解析
 │   ├── netutil/                 # 局域网 IP 检测
-│   └── server/                  # HTTP API、文件上传、网络信息
+│   └── server/                  # HTTP API、断点续传（upload.go）、口令（auth.go）、网络信息
 ├── web/
 │   ├── index.html
 │   └── static/
@@ -268,6 +288,7 @@ Three_end_transmission/
 | 参数 | 说明 |
 |------|------|
 | `name` | 设备昵称 |
+| `id` | 浏览器持久化的设备 UUID（可省略，服务端生成）；同一 ID 的新连接会替换旧连接 |
 | `platform` | `android` / `ios` / `windows` / `linux` / `macos` / `unknown`（可省略，服务端从 UA 推断） |
 
 **连接后服务端推送：**
@@ -277,7 +298,7 @@ Three_end_transmission/
 ```
 
 ```json
-{ "type": "history", "messages": [ /* 近 10 分钟消息 */ ] }
+{ "type": "history", "messages": [ /* 保留时长内、本设备可见的消息（群聊 + 与自己相关的私信） */ ] }
 ```
 
 ```json
@@ -296,7 +317,13 @@ Three_end_transmission/
 }
 ```
 
-**服务端广播：**
+**私信：** 加上 `to`（设备 ID 数组）。接收者全部无效时消息会被丢弃，不会变成群发。
+
+```json
+{ "type": "message", "to": ["3f2c...-uuid"], "payload": { "kind": "text", "content": "只给你" } }
+```
+
+**服务端投递：**
 
 ```json
 {
@@ -306,6 +333,8 @@ Three_end_transmission/
   "timestamp": 1710000000
 }
 ```
+
+私信额外带 `to` 与 `recipients`（接收设备信息，便于对方离线时显示名称）。
 
 **文件 / 图片 payload：**
 
@@ -325,22 +354,42 @@ Three_end_transmission/
 
 | 路径 | 方法 | 说明 |
 |------|------|------|
-| `/api/info` | GET | 连接信息（局域网 IP、加入 URL） |
+| `/api/info` | GET | 连接信息（局域网 IP、加入 URL、是否需要口令） |
 | `/api/qrcode` | GET | PNG 二维码，`?url=` 指定内容 |
-| `/api/upload` | POST | `multipart/form-data`，字段 `file` |
+| `/api/auth` | POST | `{"pin":"..."}`，正确则下发会话 cookie |
+| `/api/uploads` | POST | 创建续传会话：`{"name","size","mime"}` → `{"uploadId","offset","chunkSize"}` |
+| `/api/uploads/{id}` | GET | 查询已写入的 `offset`（断线后续传用）；已完成时返回 `file` |
+| `/api/uploads/{id}?offset=N` | PUT | 请求体为原始字节，`offset` 必须等于已写入字节数，否则 409 并返回正确 offset；写满后返回 `file` |
+| `/api/uploads/{id}` | DELETE | 取消上传 |
+| `/api/upload` | POST | 单次上传（兼容 curl）：`multipart/form-data`，字段 `file`，流式写盘 |
 | `/api/files/{id}` | GET | 下载已上传文件 |
+
+启用口令时，除 `/api/info`、`/api/qrcode`、`/api/auth` 和静态页面外都需要会话 cookie，否则返回 401。
 
 #### `GET /api/info` 响应示例
 
 ```json
 {
   "joinUrl": "http://192.168.117.224:8787",
+  "pinRequired": false,
+  "authorized": true,
+  "retentionSec": 3600,
   "port": 8787,
   "localIps": ["192.168.117.224"],
   "urls": ["http://192.168.117.224:8787"],
   "clientCount": 2,
   "maxUploadMb": 500
 }
+```
+
+已认证设备在启用口令时，`joinUrl` 会带上 `/#pin=...`（fragment 不会发送给服务器），二维码扫码即可免输入。
+
+#### curl 断点续传示例
+
+```bash
+ID=$(curl -s -X POST -d '{"name":"a.iso","size":'$(stat -c%s a.iso)'}' http://HUB:8787/api/uploads | jq -r .uploadId)
+OFF=$(curl -s http://HUB:8787/api/uploads/$ID | jq .offset)       # 断线后从这里继续
+tail -c +$((OFF+1)) a.iso | head -c 8388608 | curl -s -X PUT --data-binary @- "http://HUB:8787/api/uploads/$ID?offset=$OFF"
 ```
 
 #### `POST /api/upload` 响应示例
@@ -381,6 +430,10 @@ Three_end_transmission/
 - 防火墙放行 8787：`sudo ufw allow 8787` 或 `firewall-cmd --add-port=8787/tcp`
 - Hub 机器执行 `ss -tlnp | grep 8787` 确认监听
 
+### 连接信息里为什么有两个地址？
+
+每个地址对应 Hub 机器上的一块物理网卡（例如同时连着有线和 Wi‑Fi），两个都能用。地址来源按优先级取第一个非空的：`LANROOM_ADVERTISE_IP` → 本机网卡 → 浏览器访问用的 IP，不会合并。旧版本的 Docker 入口脚本会在启动时写死 IP，DHCP 换 IP 后会多出一个过期地址；重建容器即可。
+
 ### Docker 连接信息显示 `172.x`？
 
 - 说明用了 **Bridge 模式**，改用 `docker-compose.host.yml`，或直接用 Wi‑Fi IP 访问
@@ -405,7 +458,8 @@ Three_end_transmission/
 **调大上传上限（例如 2 GiB）：**
 
 ```bash
-LANROOM_MAX_UPLOAD_MB=2048 sudo docker compose -f docker-compose.host.yml up -d --build
+echo "LANROOM_MAX_UPLOAD_MB=2048" >> .env
+docker compose -f docker-compose.host.yml up -d
 ```
 
 `curl -s http://127.0.0.1:8787/api/info | jq .maxUploadMb` 可查看当前生效值。
