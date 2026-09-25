@@ -119,6 +119,8 @@ let ws = null;
 let selfDevice = null;
 let chatName = null;
 let reconnectTimer = null;
+/** 连续重连失败次数，用于指数退避（避免服务端短暂抖动时客户端高频重连放大掉线感） */
+let reconnectAttempts = 0;
 /** 当前会话消息列表，用于一键复制 */
 let chatLog = [];
 /** 进行中的上传，离开聊天室时取消 */
@@ -696,6 +698,7 @@ function connect(name) {
 
   ws.onopen = () => {
     setConnected(true);
+    reconnectAttempts = 0;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -706,6 +709,10 @@ function connect(name) {
     ws = null;
     setConnected(false);
     if (!isInChat() || !chatName) return;
+    // 指数退避 + 抖动：避免服务端短暂抖动时客户端高频重连、反复被踢，放大掉线感
+    const backoff = Math.min(1000 * 2 ** reconnectAttempts, 15000);
+    const delay = backoff + Math.random() * 500;
+    reconnectAttempts++;
     reconnectTimer = setTimeout(async () => {
       if (!isInChat() || !chatName) return;
       // 握手被 401 拒绝时浏览器只给出 1006：查一下是否需要口令（Hub 重启后会话失效）
@@ -717,7 +724,7 @@ function connect(name) {
         return;
       }
       connect(chatName);
-    }, 2000);
+    }, delay);
   };
 
   ws.onerror = () => {
@@ -759,6 +766,24 @@ function connect(name) {
     }
   };
 }
+
+/** 手机切后台/锁屏时连接可能已经静默断开；回到前台时立即检查并重连，
+ *  不用等最长 60s 的 pong 超时才被动发现（表现为"明明显示已连接但发不出去"）。 */
+function reconnectIfStale() {
+  if (!isInChat() || !chatName) return;
+  if (isOpen()) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempts = 0;
+  connect(chatName);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reconnectIfStale();
+});
+window.addEventListener("pageshow", reconnectIfStale);
 
 /** 发送聊天消息；to 为空表示群发。未连接时返回 false */
 function sendWS(payload, to) {

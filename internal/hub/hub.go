@@ -17,6 +17,18 @@ const (
 	MaxMessageSize = 512 * 1024
 	// MaxRecipients 单条定向消息最多的接收设备数。
 	MaxRecipients = 16
+	// sendBuffer 每个客户端待发送队列的容量；消息体很小，调大成本可忽略，
+	// 能吸收短时间内多条 presence/聊天广播叠加的峰值。
+	sendBuffer = 256
+)
+
+// slowClientRetryWindow / slowClientRetryDelay 发送队列瞬时打满时的补发策略：
+// 移动网络时延/吞吐通常比同局域网电脑差，缓冲区一满就立刻断线会导致手机端
+// 频繁掉线重连；只有这个窗口内始终无法送达，才判定为真正掉线并断开。
+// 定义成 var（而非 const）便于测试用更短的窗口做确定性验证。
+var (
+	slowClientRetryWindow = 3 * time.Second
+	slowClientRetryDelay  = 150 * time.Millisecond
 )
 
 type Platform string
@@ -244,7 +256,8 @@ func (h *Hub) broadcast(message []byte) {
 	h.deliver(message, nil)
 }
 
-// deliver 发给 filter 返回 true 的客户端（filter 为 nil 表示全部）；发送队列满的客户端会被断开。
+// deliver 发给 filter 返回 true 的客户端（filter 为 nil 表示全部）；
+// 发送队列瞬时打满的客户端会先补发一段时间，仍无法送达才断开。
 func (h *Hub) deliver(message []byte, filter func(*Client) bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -256,11 +269,38 @@ func (h *Hub) deliver(message []byte, filter func(*Client) bool) {
 		select {
 		case client.send <- message:
 		default:
-			go func(c *Client) {
-				h.Unregister(c)
-				_ = c.conn.Close()
-			}(client)
+			go h.deliverSlow(client, message)
 		}
+	}
+}
+
+// deliverSlow 处理发送队列瞬时打满的客户端：在 slowClientRetryWindow 内
+// 反复尝试投递，期间每次都在持有 RLock 时检查+发送，避免与 Unregister/Register
+// 关闭 send 通道产生竞态；超时仍未送达才判定为真正掉线并断开。
+func (h *Hub) deliverSlow(c *Client, message []byte) {
+	deadline := time.Now().Add(slowClientRetryWindow)
+	for time.Now().Before(deadline) {
+		h.mu.RLock()
+		if !h.clients[c] {
+			h.mu.RUnlock()
+			return // 已经因为别的原因下线
+		}
+		select {
+		case c.send <- message:
+			h.mu.RUnlock()
+			return
+		default:
+		}
+		h.mu.RUnlock()
+		time.Sleep(slowClientRetryDelay)
+	}
+
+	h.mu.RLock()
+	stillThere := h.clients[c]
+	h.mu.RUnlock()
+	if stillThere {
+		h.Unregister(c)
+		_ = c.conn.Close()
 	}
 }
 
@@ -280,7 +320,7 @@ func NewClient(h *Hub, conn *websocket.Conn, id, name string, platform Platform,
 	return &Client{
 		hub:  h,
 		conn: conn,
-		send: make(chan []byte, 64),
+		send: make(chan []byte, sendBuffer),
 		device: Device{
 			ID:       id,
 			Name:     name,

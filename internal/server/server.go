@@ -138,7 +138,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws", protect(s.handleWebSocket))
 
 	if s.cfg.StaticFS != nil {
-		mux.Handle("/", http.FileServer(s.cfg.StaticFS))
+		fileServer := http.FileServer(s.cfg.StaticFS)
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 避免手机浏览器长期缓存旧的 app.js/index.html：embed.FS 没有真实 mtime，
+			// 默认没有任何缓存校验头，部署新版本后手机可能一直跑旧脚本。
+			w.Header().Set("Cache-Control", "no-cache")
+			fileServer.ServeHTTP(w, r)
+		}))
 	}
 
 	return mux
