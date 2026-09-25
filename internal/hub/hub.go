@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"sync"
@@ -20,6 +22,8 @@ const (
 	// sendBuffer 每个客户端待发送队列的容量；消息体很小，调大成本可忽略，
 	// 能吸收短时间内多条 presence/聊天广播叠加的峰值。
 	sendBuffer = 256
+	// deviceKeyBytes 浏览器设备密钥的字节数（十六进制编码后 64 个字符）。
+	deviceKeyBytes = 32
 )
 
 // slowClientRetryWindow / slowClientRetryDelay 发送队列瞬时打满时的补发策略：
@@ -299,13 +303,22 @@ func (h *Hub) deliverSlow(c *Client, message []byte) {
 	}
 }
 
-// NewClient 创建客户端；id 为浏览器持久化的 UUID，不合法时由服务端生成。
-func NewClient(h *Hub, conn *websocket.Conn, id, name string, platform Platform, ip string) *Client {
-	if parsed, err := uuid.Parse(id); err == nil {
-		id = parsed.String()
-	} else {
-		id = uuid.New().String()
+// DeviceID 由浏览器保存的设备密钥（64 位十六进制）推导设备 ID；密钥不合法时返回随机 ID。
+// 设备 ID 会通过 presence 广播给所有人，密钥只有本设备知道：
+// 如果直接信任客户端上报的 ID，任何人都能冒充别人收取私信。
+func DeviceID(key string) string {
+	raw, err := hex.DecodeString(key)
+	if err != nil || len(raw) != deviceKeyBytes {
+		return uuid.New().String()
 	}
+	sum := sha256.Sum256(append([]byte("lanroom-device:"), raw...))
+	id, _ := uuid.FromBytes(sum[:16])
+	return id.String()
+}
+
+// NewClient 创建客户端；key 为浏览器持久化的设备密钥，设备 ID 由它推导。
+func NewClient(h *Hub, conn *websocket.Conn, key, name string, platform Platform, ip string) *Client {
+	id := DeviceID(key)
 	if name == "" {
 		name = "匿名设备"
 	}

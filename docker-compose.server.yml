@@ -1,0 +1,36 @@
+# LanRoom 公网服务器部署（配合 Nginx 反代，见 deploy/nginx/lanroom.conf）
+# 在 .env 中设置：
+#   LANROOM_PUBLIC_URL=https://drop.example.com
+#   LANROOM_PIN=<至少 8 位的口令>
+# 启动：docker compose -f docker-compose.server.yml up -d --build
+#
+# host 网络 + 只监听 127.0.0.1：8787 端口不对公网开放，只有本机 Nginx 能访问，
+# Hub 也能直接看到 Nginx 的回环地址并信任它的 X-Forwarded-* 头。
+
+services:
+  lanroom:
+    build: .
+    image: lanroom:latest
+    container_name: lanroom
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LANROOM_UPLOAD_DIR: /data/uploads
+      LANROOM_LISTEN: 127.0.0.1:8787
+      LANROOM_TRUSTED_PROXIES: 127.0.0.1,::1
+      # 必填：公网访问地址与房间口令（公网模式未设置口令会拒绝启动）
+      LANROOM_PUBLIC_URL: ${LANROOM_PUBLIC_URL:?set LANROOM_PUBLIC_URL in .env}
+      LANROOM_PIN: ${LANROOM_PIN:?set LANROOM_PIN in .env}
+      LANROOM_MAX_UPLOAD_MB: ${LANROOM_MAX_UPLOAD_MB:-}
+      LANROOM_RETENTION: ${LANROOM_RETENTION:-}
+    volumes:
+      - lanroom-uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8787/api/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  lanroom-uploads:

@@ -4,7 +4,9 @@
  */
 
 const STORAGE_KEY = "lanroom-device-name";
-const DEVICE_ID_KEY = "lanroom-device-id";
+const DEVICE_KEY_KEY = "lanroom-device-key";
+/** 旧版直接上报的设备 ID，升级后清理 */
+const LEGACY_DEVICE_ID_KEY = "lanroom-device-id";
 const UPLOAD_KEY_PREFIX = "lanroom-upload:";
 const UPLOAD_MAX_RETRIES = 10;
 const FILE_ID_RE = /^[a-f0-9]{32}$/;
@@ -161,24 +163,24 @@ function storageRemove(key) {
   }
 }
 
-/** 浏览器持久化的设备 ID：重连 / 刷新后保持不变，私信目标据此定位 */
-function getDeviceId() {
-  let id = storageGet(DEVICE_ID_KEY);
-  if (id && /^[0-9a-f-]{36}$/i.test(id)) return id;
-  if (crypto.randomUUID) {
-    id = crypto.randomUUID(); // 仅安全上下文可用
-  } else {
-    const b = crypto.getRandomValues(new Uint8Array(16));
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-    id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-  }
-  storageSet(DEVICE_ID_KEY, id);
-  return id;
+/**
+ * 浏览器持久化的设备密钥：重连 / 刷新后保持不变。只发给服务端，由服务端推导出公开的设备 ID；
+ * 别人只能看到 ID，拿不到密钥，也就无法冒充本设备收取私信。
+ */
+function getDeviceKey() {
+  let key = storageGet(DEVICE_KEY_KEY);
+  if (key && /^[0-9a-f]{64}$/.test(key)) return key;
+  // getRandomValues 在局域网 http（非安全上下文）下也可用
+  const b = crypto.getRandomValues(new Uint8Array(32));
+  key = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  storageSet(DEVICE_KEY_KEY, key);
+  storageRemove(LEGACY_DEVICE_ID_KEY);
+  return key;
 }
 
-const deviceId = getDeviceId();
+const deviceKey = getDeviceKey();
+/** 本设备 ID，由服务端 welcome 下发 */
+let deviceId = null;
 
 // --- 工具函数 ---
 
@@ -297,9 +299,18 @@ function initPlatformUI() {
   if (isMobilePlatform()) {
     addJoinHint(
       "mobile-join-hint",
-      "手机请扫 Hub 页「连接信息」里的二维码，或手动输入 http://192.168.x.x:8787。"
+      `手机请扫 Hub 页「连接信息」里的二维码，或手动输入 ${joinHintAddress()}。`
     );
   }
+}
+
+/** 提示用的加入地址：通过局域网 IP 或公网域名打开时就是当前地址，本机回环地址时给出示例 */
+function joinHintAddress() {
+  const h = location.hostname;
+  if (h === "localhost" || h === "::1" || h === "[::1]" || h.startsWith("127.")) {
+    return "http://192.168.x.x:8787";
+  }
+  return location.origin;
 }
 
 function isMobilePlatform() {
@@ -718,7 +729,7 @@ function connect(name) {
   }
 
   const platform = detectPlatform();
-  const params = new URLSearchParams({ name, platform, id: deviceId });
+  const params = new URLSearchParams({ name, platform, key: deviceKey });
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${protocol}://${location.host}/ws?${params}`);
 
@@ -772,6 +783,7 @@ function connect(name) {
 
     if (data.type === "welcome") {
       selfDevice = data.device || null;
+      deviceId = selfDevice?.id || null;
       return;
     }
 

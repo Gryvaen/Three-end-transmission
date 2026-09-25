@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -20,7 +19,8 @@ const (
 // authState 房间口令（LANROOM_PIN）。pin 为空时不启用，所有请求放行。
 // 会话只保存在内存里，Hub 重启后需要重新输入口令。
 type authState struct {
-	pin string
+	pin     string
+	proxies proxyTrust
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> 过期时间
@@ -32,9 +32,10 @@ type failWindow struct {
 	start time.Time
 }
 
-func newAuthState(pin string) *authState {
+func newAuthState(pin string, proxies proxyTrust) *authState {
 	return &authState{
 		pin:      pin,
+		proxies:  proxies,
 		sessions: make(map[string]time.Time),
 		fails:    make(map[string]failWindow),
 	}
@@ -80,11 +81,9 @@ func (a *authState) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 限速按 TCP 对端地址，不信任可伪造的 X-Forwarded-For
-	peer, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		peer = r.RemoteAddr
-	}
+	// 限速按真实客户端地址：反代后面所有请求的 TCP 对端都是代理，
+	// 只信任可信代理给出的转发头，客户端自己伪造的无效
+	peer := a.proxies.rawClientIP(r)
 	if a.tooManyFails(peer) {
 		http.Error(w, "too many attempts, retry later", http.StatusTooManyRequests)
 		return
@@ -119,6 +118,7 @@ func (a *authState) handleAuth(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
+		Secure:   a.proxies.isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

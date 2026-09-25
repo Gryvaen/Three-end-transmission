@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -111,4 +112,24 @@ func TestDeliverSlowClientDisconnectsAfterRetryWindow(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("client stuck with a permanently full send buffer should eventually be disconnected")
+}
+
+func TestDeviceIDFromKey(t *testing.T) {
+	key := strings.Repeat("ab", 32)
+	id := DeviceID(key)
+	if _, err := uuid.Parse(id); err != nil {
+		t.Fatalf("not a uuid: %q", id)
+	}
+	if DeviceID(key) != id || DeviceID(strings.ToUpper(key)) != id {
+		t.Fatal("same key must map to the same device ID")
+	}
+	// 用公开的设备 ID 当密钥得不到同一个 ID
+	if DeviceID(strings.ReplaceAll(id, "-", "")) == id {
+		t.Fatal("device ID must not be usable as its own key")
+	}
+	for _, bad := range []string{"", "xyz", id, strings.Repeat("a", 63)} {
+		if a, b := DeviceID(bad), DeviceID(bad); a == b {
+			t.Fatalf("invalid key %q should get a fresh random ID", bad)
+		}
+	}
 }

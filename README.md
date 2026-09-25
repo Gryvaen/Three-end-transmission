@@ -1,498 +1,392 @@
-# LanRoom · 局域网聊天式互传
+# LanRoom
 
-Go 编写的局域网 **Hub + WebSocket 群聊**：Android / Windows / Linux / iOS 只需 **打开浏览器** 即可互传文字、图片与文件，无需安装 App。
+跨设备的文字与文件互传工具。一个 Go 单文件服务端 + 浏览器页面，Android、iOS、Windows、macOS、Linux 打开网页即可加入，无需安装任何客户端。
 
-以 **局域网 IP** 为唯一加入方式：IP 二维码、大文件断点续传、指定设备私信、可选房间口令、各平台定制 UI。
+- **局域网模式**（默认）：在家里或办公室的一台电脑 / NAS 上运行，同一 Wi‑Fi 下的设备扫码加入。
+- **公网模式**：部署到自己的服务器，通过 Nginx + HTTPS 用域名访问，设备不必在同一网络。
 
 ---
 
 ## 目录
 
-- [功能概览](#功能概览)
-- [架构说明](#架构说明)
-- [环境要求](#环境要求)
+- [功能](#功能)
 - [快速开始](#快速开始)
-- [各设备如何加入](#各设备如何加入)
-- [Docker 部署](#docker-部署)
-- [环境变量](#环境变量)
-- [限制与约定](#限制与约定)
-- [项目结构](#项目结构)
-- [API 参考](#api-参考)
-- [各平台说明](#各平台说明)
+- [部署](#部署)
+  - [局域网：Docker](#局域网docker)
+  - [公网服务器：Nginx + HTTPS](#公网服务器nginx--https)
+- [配置](#配置)
+- [安全模型](#安全模型)
+- [限制](#限制)
+- [API](#api)
+- [架构](#架构)
+- [开发](#开发)
 - [常见问题](#常见问题)
-- [本地开发](#本地开发)
 - [许可证](#许可证)
 
 ---
 
-## 功能概览
+## 功能
 
 | 功能 | 说明 |
 |------|------|
-| WebSocket 群聊 | 文字消息实时广播 |
-| 在线设备列表 | 显示昵称、IP、平台图标 |
-| 图片 / 文件 | 分片上传到 Hub（显示进度、速度，可取消），再通过 WebSocket 发送 `fileId` |
-| 断点续传 | Wi‑Fi 抖动自动重试并从断点继续；刷新页面后重新选择同一文件也能续传 |
-| 指定设备发送 | 点击在线设备即可私信，文字 / 文件 / 粘贴 / 拖拽都只发给对方 |
-| 房间口令 | 设置 `LANROOM_PIN` 后需输入口令；Hub 页二维码自带口令，扫码即进 |
-| 拖拽上传 / 大图预览 | 桌面端把文件拖进窗口即发送；点击图片全屏查看 |
-| IP 二维码 | 全平台通用，扫 `http://192.168.x.x:8787` 加入 |
-| 断线重连 | 聊天页内自动重连；设备 ID 保存在浏览器，刷新后仍是同一台设备 |
-| 聊天历史 | 默认保留 1 小时（`LANROOM_RETENTION`），新设备加入可回看群聊 |
-| 平台 UI | `platform.css` 按 Android / iOS / Windows / Linux / macOS 切换主题 |
-
----
-
-## 架构说明
-
-```mermaid
-flowchart LR
-  subgraph clients [客户端]
-    Browser[浏览器 WebSocket]
-  end
-
-  subgraph hub [Hub 进程]
-    HTTP[HTTP API]
-    WS[WebSocket Hub]
-    Files[临时文件存储]
-  end
-
-  Browser -->|/ws| WS
-  Browser -->|/api/upload /api/files| HTTP
-  HTTP --> WS
-  HTTP --> Files
-```
-
-**消息流程（浏览器）：**
-
-1. 打开页面 → WebSocket 连接 `/ws?name=...&platform=...`
-2. 服务端推送 `welcome`（本设备 ID）、`history`（近期消息）、`presence`（在线列表）
-3. 发文字：WebSocket 发送 `{ type: "message", payload: { kind: "text", ... } }`
-4. 发文件：`POST /api/uploads` 创建上传会话 → 分片 `PUT` → 完成后获得 `fileId`，再通过 WebSocket 发送 `kind: "file"` 或 `"image"`
-5. 私信：消息带 `to: [设备ID]`，服务端只投递给对方和发送者本人
-
----
-
-## 环境要求
-
-| 项目 | 要求 |
-|------|------|
-| Go | **1.22+**（`go.mod` 可指定更高版本，支持 `GOTOOLCHAIN=auto`） |
-| 网络 | 设备在同一局域网，路由器关闭 **AP 隔离** |
-| Windows | 防火墙允许入站 **8787**（专用网络） |
+| 群聊 | 基于 WebSocket 的实时文字消息 |
+| 文件与图片 | 分片上传，显示进度与速度，可取消；图片可全屏预览 |
+| 断点续传 | 网络抖动自动重试并从断点继续；刷新页面后重新选择同一文件也能续传 |
+| 私信 | 点击在线设备即可单独发送文字、文件、粘贴内容或拖拽文件 |
+| 房间口令 | 可选（公网模式强制）；已登录设备展示的二维码自带口令，扫码即进 |
+| 扫码加入 | 「连接信息」弹窗生成加入地址二维码 |
+| 断线重连 | 自动重连；设备身份保存在浏览器，刷新后仍是同一台设备 |
+| 消息历史 | 默认保留 1 小时，新加入的设备可回看群聊 |
+| 平台适配 | 按 Android / iOS / Windows / macOS / Linux 调整界面与交互 |
 
 ---
 
 ## 快速开始
 
-### 1. 进入项目
+需要 Go 1.26+（或 Go 1.21+ 并允许 `GOTOOLCHAIN=auto` 自动下载工具链）。
 
 ```bash
-cd /path/to/Three_end_transmission
-go mod tidy
+git clone <repo-url> lanroom && cd lanroom
+go run .                     # 默认监听 :8787
 ```
 
-### 2. 启动 Hub
+浏览器打开 `http://127.0.0.1:8787`，输入昵称进入。其他设备点页面上的「连接信息」扫描二维码，或手动访问 `http://<本机局域网 IP>:8787`。
 
-```bash
-go run . -port 8787
-```
-
-成功日志示例：
-
-```
-level=INFO msg="hub started" addr=:8787 maxUploadMiB=500
-```
-
-### 3. 打开浏览器
-
-| 场景 | 地址 |
-|------|------|
-| 本机 | `http://127.0.0.1:8787` |
-| 同网段其他设备 | `http://192.168.x.x:8787` |
-| 手机 | 页面 →「查看连接地址 / 二维码」扫码 |
-
-输入昵称 → **进入聊天室** → 发文字、图片、文件。
-
-### 4. 编译单文件（可选）
+编译为单文件：
 
 ```bash
 go build -o lanroom .
 ./lanroom -port 8787
 ```
 
----
-
-## 各设备如何加入
-
-连接信息弹窗提供 **局域网 IP 二维码**，全平台通用：
-
-| 角色 | 推荐地址 |
-|------|----------|
-| 手机（全部平台） | 扫 IP 二维码，或手动输入 `http://192.168.x.x:8787` |
-| 本机浏览器 | `http://127.0.0.1:8787` |
-| 同网段电脑 | `http://192.168.x.x:8787` |
-
-手机若已保存过昵称，可在 URL 加 `?auto=1` 跳过进入页（需本地已有设备名缓存）。
-
-**IP 变了怎么办？** 在 Hub 机器打开「连接信息」，扫新二维码即可。若路由器支持，可为 Hub 机器绑定 **静态 DHCP**，避免频繁换 IP。
+前端资源通过 `go:embed` 打包进二进制，运行时不依赖任何外部文件。
 
 ---
 
-## Docker 部署
+## 部署
 
-无需安装 Go，适合 NAS、服务器长期运行。
+### 局域网：Docker
 
-### 方式 A：Host 网络（Linux 推荐）
-
-容器直接使用宿主机网络，自动获取局域网 IP，无需手动设置 `LANROOM_ADVERTISE_IP`。
-
-**要求：** Linux 宿主机、`docker-compose.host.yml`（Mac/Windows Docker Desktop **不支持** host 网络）。
+**Host 网络（Linux 推荐）**：容器直接使用宿主机网络，能自动识别局域网 IP。
 
 ```bash
-cd /path/to/Three_end_transmission
-sudo docker compose -f docker-compose.host.yml up -d --build
+docker compose -f docker-compose.host.yml up -d --build
 ```
 
-验证：
+**Bridge 端口映射**（macOS / Windows 的 Docker Desktop 不支持 host 网络时使用）：
 
 ```bash
-sudo docker compose -f docker-compose.host.yml ps
-curl -s http://127.0.0.1:8787/api/info | jq .
+LANROOM_ADVERTISE_IP=192.168.1.10 docker compose up -d --build
 ```
 
-| 设备 | 访问方式 |
-|------|----------|
-| 本机 | `http://127.0.0.1:8787` |
-| 手机 / 其他设备 | 连接信息 → 扫 **IP 二维码** |
+Bridge 模式下容器看不到宿主机网卡，需要用 `LANROOM_ADVERTISE_IP` 指定二维码中展示的宿主机 IP。
 
-维护：
+常用设置写在项目目录的 `.env` 中，Docker Compose 会自动读取：
 
-```bash
-sudo docker compose -f docker-compose.host.yml logs -f
-sudo docker compose -f docker-compose.host.yml down
-sudo docker compose -f docker-compose.host.yml up -d --build
+```dotenv
+LANROOM_PIN=2468
+LANROOM_RETENTION=24h
+LANROOM_MAX_UPLOAD_MB=2048
 ```
 
-`restart: unless-stopped` 已配置；配合 `systemctl enable docker` 可开机自启。
+上传文件保存在 Docker 卷 `lanroom-uploads`（容器内 `/data/uploads`）。容器配置了 `restart: unless-stopped`，Docker 开机自启后服务会随之启动。
 
-### 方式 B：Bridge 端口映射
+### 公网服务器：Nginx + HTTPS
 
-快速试用；请用 **局域网 IP** 访问。
+设置 `LANROOM_PUBLIC_URL` 后进入公网模式：
 
-```bash
-docker compose up -d --build
-# 浏览器：http://<宿主机 Wi-Fi IP>:8787
+- 加入地址与二维码使用公网地址，不再展示服务器内网 IP；
+- 必须设置 `LANROOM_PIN`，否则拒绝启动（少于 8 位会输出警告）；
+- 通过 HTTPS 访问时，登录 cookie 带 `Secure` 标记。
+
+推荐拓扑：Nginx 监听 80/443 并终止 TLS，反向代理到只监听 `127.0.0.1:8787` 的 LanRoom。8787 端口不对公网开放。
+
+```
+浏览器 ──HTTPS/WSS──▶ Nginx :443 ──HTTP──▶ LanRoom 127.0.0.1:8787
 ```
 
-Bridge 模式下容器内可能是 `172.x` 地址，页面会自动过滤并展示宿主机 LAN IP。也可手动指定：
+**1. 域名与证书**
+
+将域名解析到服务器，防火墙放行 80 与 443，然后申请证书：
 
 ```bash
-LANROOM_ADVERTISE_IP=192.168.117.224 docker compose up -d --build
+sudo certbot certonly --nginx -d drop.example.com
 ```
 
-查看 Wi‑Fi IP：`ip -4 addr show wlan0`
+**2. 配置 Nginx**
 
-自定义端口：
+复制示例配置 [`deploy/nginx/lanroom.conf`](deploy/nginx/lanroom.conf)，把其中的 `drop.example.com` 替换为你的域名：
 
 ```bash
-LANROOM_PORT=8888 docker compose up -d --build
+sudo cp deploy/nginx/lanroom.conf /etc/nginx/conf.d/lanroom.conf
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### Docker 数据
+Nginx 早于 1.25.1 时，删除 `http2 on;`，改为 `listen 443 ssl http2;`。
 
-上传文件保存在卷 `lanroom-uploads`（路径 `/data/uploads`）。**聊天历史在内存中**，Hub 重启后清空，同时清理上次遗留的上传文件；运行期间文件在保留时长到期后清理（见 [限制与约定](#限制与约定)）。
+如需自行编写配置，以下几项不可省略：
 
-启用房间口令：
+| 配置 | 用途 |
+|------|------|
+| `proxy_http_version 1.1`，转发 `Upgrade` / `Connection` 头 | WebSocket |
+| `proxy_set_header Host $host` | 服务端据此校验 WebSocket 的 Origin |
+| `X-Forwarded-For $remote_addr`，`X-Forwarded-Proto $scheme` | 识别真实客户端 IP 与 HTTPS |
+| `client_max_body_size 0`，`proxy_request_buffering off`，`proxy_buffering off` | 大文件流式上传与下载，大小上限由 LanRoom 控制 |
+| `proxy_read_timeout 3600s` | 慢速网络上传与空闲 WebSocket |
+
+**3. 启动 LanRoom**
 
 ```bash
-echo "LANROOM_PIN=2468" >> .env   # docker compose 自动读取项目目录下的 .env
-docker compose -f docker-compose.host.yml up -d
+cat >> .env <<'EOF'
+LANROOM_PUBLIC_URL=https://drop.example.com
+LANROOM_PIN=<足够长的口令>
+EOF
+docker compose -f docker-compose.server.yml up -d --build
+```
+
+[`docker-compose.server.yml`](docker-compose.server.yml) 使用 host 网络，并已设置 `LANROOM_LISTEN=127.0.0.1:8787` 与 `LANROOM_TRUSTED_PROXIES=127.0.0.1,::1`。
+
+不使用 Docker 时：
+
+```bash
+LANROOM_PUBLIC_URL=https://drop.example.com \
+LANROOM_PIN=<足够长的口令> \
+LANROOM_LISTEN=127.0.0.1:8787 \
+LANROOM_TRUSTED_PROXIES=127.0.0.1,::1 \
+LANROOM_UPLOAD_DIR=/var/lib/lanroom \
+./lanroom
+```
+
+**4. 验证**
+
+```bash
+curl -s https://drop.example.com/api/info | jq '{joinUrl, pinRequired}'
+# { "joinUrl": "https://drop.example.com", "pinRequired": true }
 ```
 
 ---
 
-## 环境变量
+## 配置
 
-### Hub 进程（`go run .` / Docker）
+所有配置通过环境变量设置，命令行参数只有两个。
 
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `LANROOM_ADVERTISE_IP` | 对外展示的局域网 IP（Bridge / 多网卡），设置后**只**展示这些 IP | 自动检测网卡 |
-| `LANROOM_MAX_UPLOAD_MB` | 单文件上传上限（MiB），默认 `500`，封顶 `4096` | `500` |
-| `LANROOM_RETENTION` | 消息历史与上传文件保留时长（Go duration，如 `30m`、`24h`，最短 `1m`） | `1h` |
-| `LANROOM_PIN` | 房间口令；为空表示不启用 | 空 |
-| `LANROOM_UPLOAD_DIR` | 上传文件目录 | 系统临时目录下的 `three-end-transmission-uploads` |
+| 命令行参数 | 说明 | 默认 |
+|------------|------|------|
+| `-port` | 监听端口 | `8787` |
+| `-addr` | 完整监听地址，如 `127.0.0.1:8787`；优先于 `-port` 与 `LANROOM_LISTEN` | 空 |
 
-### Docker Compose
-
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `LANROOM_PORT` | Bridge 模式宿主机端口 | `8787` |
-| `LANROOM_ADVERTISE_IP` | Bridge 模式固定展示 IP | 空 |
-| `LANROOM_RETENTION` / `LANROOM_PIN` / `LANROOM_MAX_UPLOAD_MB` | 透传给 Hub，含义同上 | 空 |
+| 环境变量 | 说明 | 默认 |
+|----------|------|------|
+| `LANROOM_PIN` | 房间口令，为空表示不启用 | 空 |
+| `LANROOM_RETENTION` | 消息历史与上传文件的保留时长，Go duration 格式（`30m`、`24h`），最短 `1m` | `1h` |
+| `LANROOM_MAX_UPLOAD_MB` | 单文件上传上限（MiB），最大 `4096` | `500` |
+| `LANROOM_UPLOAD_DIR` | 上传文件目录 | `<系统临时目录>/three-end-transmission-uploads` |
+| `LANROOM_ADVERTISE_IP` | 局域网模式下展示的 IP（逗号分隔），用于 Docker bridge 或多网卡 | 自动检测 |
+| `LANROOM_PUBLIC_URL` | 公网访问地址，如 `https://drop.example.com`；不能包含路径。设置后进入公网模式 | 空 |
+| `LANROOM_LISTEN` | 监听地址，放在反向代理后时设为 `127.0.0.1:8787` | `:<port>` |
+| `LANROOM_TRUSTED_PROXIES` | 可信反向代理的 IP 或 CIDR（逗号分隔）。只有来自这些地址的请求才读取 `X-Forwarded-For`、`X-Real-IP`、`X-Forwarded-Proto` | 空 |
+| `LANROOM_PORT` | 仅 `docker-compose.yml`：宿主机映射端口 | `8787` |
 
 ---
 
-## 限制与约定
+## 安全模型
+
+- **访问控制**：一个房间对应一个共享口令，没有用户账号。启用口令后，除首页静态资源、`/api/info`、`/api/qrcode`、`/api/auth` 外，所有接口都需要登录。登录会话保存在内存中，有效期 30 天，服务重启后需重新登录。
+- **暴力破解防护**：同一客户端 IP 每分钟最多输错 5 次。放在反向代理后时必须配置 `LANROOM_TRUSTED_PROXIES`，否则所有人共用代理的 IP，一人输错会锁住所有人。
+- **转发头**：只信任 `LANROOM_TRUSTED_PROXIES` 中代理发来的 `X-Forwarded-*` 头，客户端伪造的无效。
+- **设备身份**：浏览器在本地生成并保存一个随机设备密钥，服务端用它推导出公开的设备 ID。其他人能看到设备 ID，但无法据此冒充该设备，也收不到发给它的私信。
+- **私信**：服务端只把私信投递给接收者和发送者本人。文件用 128 位随机 ID 标识，私信中的文件只有拿到 ID 的人才能下载。
+- **WebSocket**：拒绝来自其他网站的连接，防止借用登录 cookie。
+- **传输**：局域网模式是明文 HTTP，适合可信网络，同一 Wi‑Fi 下有不信任的人时请启用口令。公网部署务必使用 HTTPS。
+- **口令分享**：已登录设备的二维码包含口令（放在 URL fragment 中，不会发送给服务器），请勿公开展示。
+
+---
+
+## 限制
 
 | 项目 | 值 |
 |------|-----|
-| 默认端口 | `8787`（`internal/config.DefaultPort`） |
-| WebSocket 单条消息 | 最大 **512 KB** |
-| 单文件上传 | 默认 **500 MiB**，可用 `LANROOM_MAX_UPLOAD_MB` 调整（最大 4096） |
-| 聊天历史保留 | 默认 **1 小时**（`LANROOM_RETENTION`，内存，重启丢失） |
-| 上传文件保留 | 与聊天历史相同（后台每 5 分钟清理；未完成的续传会话超过保留时长无进展也会清理） |
-| 上传分片 | **8 MiB** / 片 |
+| 单文件上传 | 默认 500 MiB，最大 4096 MiB |
+| 上传分片 | 8 MiB |
+| WebSocket 单条消息 | 512 KB |
 | 私信接收者 | 单条最多 16 台设备 |
-| 口令会话 | 30 天（内存，Hub 重启后需重新输入）；同一 IP 每分钟最多错 5 次 |
-| 文件 ID | 32 位十六进制 |
+| 消息与文件保留 | 默认 1 小时；后台每 5 分钟清理，长时间无进展的续传会话同样清理 |
+| 持久化 | 消息历史、文件索引与登录会话都保存在内存中。服务重启后全部清空，并删除上传目录中遗留的文件 |
 
-Hub 重启后：内存中的聊天历史、文件索引与口令会话清空，上传目录中本程序留下的文件（32 位十六进制文件名）会在启动时删除。
-
-**安全说明：** 局域网内明文 HTTP。私信的隔离依靠服务端投递控制与 128 位随机文件 ID；如同一 Wi‑Fi 下有不信任的人，请启用 `LANROOM_PIN`。
+目前尚不支持：多房间或用户账号、磁盘总容量配额、部署在子路径下（如 `https://example.com/lanroom/`）。
 
 ---
 
-## 项目结构
+## API
 
-```
-Three_end_transmission/
-├── main.go                      # 入口：embed 静态资源、HTTP
-├── Dockerfile
-├── docker-compose.yml           # Bridge 部署
-├── docker-compose.host.yml      # Linux host 网络
-├── scripts/docker-entrypoint.sh # 修正卷权限后降权启动 Hub
-├── internal/
-│   ├── config/                  # 默认端口等常量
-│   ├── hub/                     # WebSocket Hub、协议、平台解析
-│   ├── netutil/                 # 局域网 IP 检测
-│   └── server/                  # HTTP API、断点续传（upload.go）、口令（auth.go）、网络信息
-├── web/
-│   ├── index.html
-│   └── static/
-│       ├── app.js               # 前端逻辑
-│       ├── style.css            # 通用样式
-│       └── platform.css         # 各平台主题与移动端布局
-└── README.md
-```
-
----
-
-## API 参考
+所有接口与页面同源，客户端使用相对路径，因此可以部署在任意域名或反向代理之后。
 
 ### WebSocket `GET /ws`
-
-查询参数：
 
 | 参数 | 说明 |
 |------|------|
 | `name` | 设备昵称 |
-| `id` | 浏览器持久化的设备 UUID（可省略，服务端生成）；同一 ID 的新连接会替换旧连接 |
-| `platform` | `android` / `ios` / `windows` / `linux` / `macos` / `unknown`（可省略，服务端从 UA 推断） |
+| `key` | 设备密钥，64 位十六进制。服务端据此推导设备 ID；省略时每次连接分配随机 ID。同一密钥的多个连接（如多个标签页）同时在线 |
+| `platform` | `android` / `ios` / `windows` / `linux` / `macos` / `unknown`；省略时根据 User-Agent 推断 |
 
-**连接后服务端推送：**
-
-```json
-{ "type": "welcome", "device": { "id": "...", "name": "...", "platform": "linux", "ip": "192.168.1.2" } }
-```
+连接后服务端依次推送：
 
 ```json
-{ "type": "history", "messages": [ /* 保留时长内、本设备可见的消息（群聊 + 与自己相关的私信） */ ] }
+{ "type": "welcome",  "device": { "id": "…", "name": "…", "platform": "linux", "ip": "192.168.1.2" } }
+{ "type": "history",  "messages": [ /* 保留期内本设备可见的消息 */ ] }
+{ "type": "presence", "users": [ { "id": "…", "name": "…", "platform": "android", "ip": "…" } ] }
 ```
+
+客户端发送消息：
 
 ```json
-{ "type": "presence", "users": [ { "id": "...", "name": "...", "platform": "android", "ip": "..." } ] }
+{ "type": "message", "payload": { "kind": "text", "content": "你好" } }
 ```
 
-**客户端发送消息：**
+发送私信时加上 `to`（设备 ID 数组）。接收者全部无效时，消息会被丢弃，而不是改为群发：
 
 ```json
-{
-  "type": "message",
-  "payload": {
-    "kind": "text",
-    "content": "你好"
-  }
-}
+{ "type": "message", "to": ["3f2c…"], "payload": { "kind": "text", "content": "只给你" } }
 ```
 
-**私信：** 加上 `to`（设备 ID 数组）。接收者全部无效时消息会被丢弃，不会变成群发。
+文件与图片消息先上传得到 `fileId`，再发送：
 
 ```json
-{ "type": "message", "to": ["3f2c...-uuid"], "payload": { "kind": "text", "content": "只给你" } }
+{ "kind": "file", "fileId": "a1b2…", "meta": { "name": "report.pdf", "size": 1024, "mime": "application/pdf" } }
 ```
 
-**服务端投递：**
+`kind` 为 `image` 时结构相同。服务端投递的消息额外带有 `from` 与 `timestamp`；私信还带 `to` 与 `recipients`。
 
-```json
-{
-  "type": "message",
-  "from": { "id": "...", "name": "Windows PC", "platform": "windows", "ip": "192.168.1.3" },
-  "payload": { "kind": "text", "content": "你好" },
-  "timestamp": 1710000000
-}
-```
-
-私信额外带 `to` 与 `recipients`（接收设备信息，便于对方离线时显示名称）。
-
-**文件 / 图片 payload：**
-
-```json
-{
-  "kind": "file",
-  "fileId": "a1b2c3...",
-  "meta": { "name": "report.pdf", "size": 1024, "mime": "application/pdf" }
-}
-```
-
-`kind` 为 `"image"` 时同上，客户端从 `/api/files/{fileId}` 加载图片。
-
----
-
-### HTTP 接口
+### HTTP
 
 | 路径 | 方法 | 说明 |
 |------|------|------|
-| `/api/info` | GET | 连接信息（局域网 IP、加入 URL、是否需要口令） |
-| `/api/qrcode` | GET | PNG 二维码，`?url=` 指定内容 |
-| `/api/auth` | POST | `{"pin":"..."}`，正确则下发会话 cookie |
+| `/api/info` | GET | 连接信息：加入地址、是否需要口令、保留时长、上传上限等 |
+| `/api/qrcode?url=` | GET | 生成指定内容的 PNG 二维码 |
+| `/api/auth` | POST | `{"pin":"…"}`，口令正确时下发会话 cookie |
 | `/api/uploads` | POST | 创建续传会话：`{"name","size","mime"}` → `{"uploadId","offset","chunkSize"}` |
-| `/api/uploads/{id}` | GET | 查询已写入的 `offset`（断线后续传用）；已完成时返回 `file` |
-| `/api/uploads/{id}?offset=N` | PUT | 请求体为原始字节，`offset` 必须等于已写入字节数，否则 409 并返回正确 offset；写满后返回 `file` |
+| `/api/uploads/{id}` | GET | 查询已写入的 `offset`；上传完成时返回 `file` |
+| `/api/uploads/{id}?offset=N` | PUT | 请求体为原始字节。`offset` 必须等于已写入字节数，否则返回 409 并附带正确 offset |
 | `/api/uploads/{id}` | DELETE | 取消上传 |
-| `/api/upload` | POST | 单次上传（兼容 curl）：`multipart/form-data`，字段 `file`，流式写盘 |
-| `/api/files/{id}` | GET | 下载已上传文件 |
+| `/api/upload` | POST | 单次上传（`multipart/form-data`，字段 `file`），便于 curl 使用 |
+| `/api/files/{id}` | GET | 下载文件 |
 
-启用口令时，除 `/api/info`、`/api/qrcode`、`/api/auth` 和静态页面外都需要会话 cookie，否则返回 401。
-
-#### `GET /api/info` 响应示例
+`/api/info` 响应示例（局域网模式）：
 
 ```json
 {
-  "joinUrl": "http://192.168.117.224:8787",
+  "joinUrl": "http://192.168.1.10:8787",
   "pinRequired": false,
   "authorized": true,
   "retentionSec": 3600,
   "port": 8787,
-  "localIps": ["192.168.117.224"],
-  "urls": ["http://192.168.117.224:8787"],
+  "localIps": ["192.168.1.10"],
+  "urls": ["http://192.168.1.10:8787"],
   "clientCount": 2,
   "maxUploadMb": 500
 }
 ```
 
-已认证设备在启用口令时，`joinUrl` 会带上 `/#pin=...`（fragment 不会发送给服务器），二维码扫码即可免输入。
+公网模式下会多一个 `publicUrl` 字段，`joinUrl` 与 `urls` 为公网地址，`localIps` 为空。
 
-#### curl 断点续传示例
+用 curl 续传：
 
 ```bash
-ID=$(curl -s -X POST -d '{"name":"a.iso","size":'$(stat -c%s a.iso)'}' http://HUB:8787/api/uploads | jq -r .uploadId)
-OFF=$(curl -s http://HUB:8787/api/uploads/$ID | jq .offset)       # 断线后从这里继续
-tail -c +$((OFF+1)) a.iso | head -c 8388608 | curl -s -X PUT --data-binary @- "http://HUB:8787/api/uploads/$ID?offset=$OFF"
+HUB=http://192.168.1.10:8787
+ID=$(curl -s -X POST -d "{\"name\":\"a.iso\",\"size\":$(stat -c%s a.iso)}" $HUB/api/uploads | jq -r .uploadId)
+OFF=$(curl -s $HUB/api/uploads/$ID | jq .offset)
+tail -c +$((OFF+1)) a.iso | head -c 8388608 | curl -s -X PUT --data-binary @- "$HUB/api/uploads/$ID?offset=$OFF"
 ```
 
-#### `POST /api/upload` 响应示例
+启用口令时，先调用 `/api/auth` 并在后续请求中带上 cookie（`curl -c jar` / `-b jar`）。
 
-```json
-{
-  "fileId": "a1b2c3d4e5f6...",
-  "name": "photo.png",
-  "size": 12345,
-  "mime": "image/png"
-}
+---
+
+## 架构
+
+```mermaid
+flowchart LR
+  Browser[浏览器] -->|WebSocket /ws| Hub[消息 Hub]
+  Browser -->|HTTP /api/*| API[HTTP API]
+  API --> Hub
+  API --> Disk[(上传目录)]
+```
+
+发送文件时，浏览器先通过 HTTP 分片上传得到 `fileId`，再通过 WebSocket 广播一条引用该 `fileId` 的消息。接收方按需从 `/api/files/{id}` 下载。
+
+```
+.
+├── main.go                       # 入口：读取配置、嵌入前端资源、启动 HTTP 服务
+├── internal/
+│   ├── config/                   # 环境变量解析
+│   ├── hub/                      # WebSocket Hub、消息协议、设备身份
+│   ├── netutil/                  # 局域网 IP 检测
+│   └── server/                   # HTTP 路由、断点续传、口令认证、代理与客户端 IP
+├── web/                          # 前端页面、脚本与样式
+├── deploy/nginx/lanroom.conf     # Nginx 反向代理示例
+├── Dockerfile
+├── docker-compose.yml            # 局域网：bridge 端口映射
+├── docker-compose.host.yml       # 局域网：Linux host 网络
+├── docker-compose.server.yml     # 公网服务器（配合 Nginx）
+└── scripts/docker-entrypoint.sh  # 修正卷权限后以非 root 用户启动
 ```
 
 ---
 
-## 各平台说明
+## 开发
 
-| 平台 | 推荐加入方式 |
-|------|--------------|
-| 全部平台 | 扫 IP 二维码或输入 `http://192.168.x.x:8787` |
-| 本机 | `http://127.0.0.1:8787` |
+```bash
+go test ./...        # 运行测试
+go vet ./...
+go run .             # 启动开发服务
+```
 
-**Android：** 输入栏固定底部，点 👥 打开设备抽屉；勿开「桌面版网站」。
-
-**iOS：** 可「添加到主屏幕」；剪贴板自动同步受限。
-
-**Linux 桌面：** 消息区隐藏原生滚动条（避免 GTK 白边）。
+修改 `web/` 下的文件后需要重启服务，因为前端资源在编译时嵌入二进制。页面对静态资源设置了 `Cache-Control: no-cache`，手机浏览器刷新即可拿到新版本。
 
 ---
 
 ## 常见问题
 
-### 手机扫码后打不开？
+**手机扫码后打不开页面**
 
-- 确认与 Hub **同一 WiFi**（非蜂窝数据）
-- 扫 **IP 二维码**，或手动输入 `http://192.168.x.x:8787`
-- 关闭路由器 **AP 隔离 / 访客网络**
-- 防火墙放行 8787：`sudo ufw allow 8787` 或 `firewall-cmd --add-port=8787/tcp`
-- Hub 机器执行 `ss -tlnp | grep 8787` 确认监听
+- 确认手机连的是与服务端同一个 Wi‑Fi，而不是蜂窝数据。
+- 关闭路由器的 AP 隔离或访客网络。
+- 放行防火墙端口：`sudo ufw allow 8787`；Windows 请将网络设为「专用网络」并允许 8787 入站。
+- 在服务端执行 `ss -tlnp | grep 8787`，确认服务正在监听。
 
-### 连接信息里为什么有两个地址？
+**连接信息里显示 `172.x` 地址或没有地址**
 
-每个地址对应 Hub 机器上的一块物理网卡（例如同时连着有线和 Wi‑Fi），两个都能用。地址来源按优先级取第一个非空的：`LANROOM_ADVERTISE_IP` → 本机网卡 → 浏览器访问用的 IP，不会合并。旧版本的 Docker 入口脚本会在启动时写死 IP，DHCP 换 IP 后会多出一个过期地址；重建容器即可。
+说明运行在 Docker bridge 网络中。改用 `docker-compose.host.yml`，或设置 `LANROOM_ADVERTISE_IP=<宿主机局域网 IP>`。
 
-### Docker 连接信息显示 `172.x`？
+**连接信息里有两个地址**
 
-- 说明用了 **Bridge 模式**，改用 `docker-compose.host.yml`，或直接用 Wi‑Fi IP 访问
-- 或设置 `LANROOM_ADVERTISE_IP=<宿主机 LAN IP>`
+服务端有多块网卡（例如有线和 Wi‑Fi 同时连接），两个地址都可以用。
 
-### Windows 其他设备连不上？
+**局域网 IP 变了**
 
-- WiFi 设为 **专用网络**
-- 防火墙允许 **8787**
+重新打开「连接信息」扫描新二维码即可。建议在路由器上为服务端绑定静态 DHCP 地址。
 
-### Linux 上传文件失败？
+**公网部署后 WebSocket 连不上（一直显示未连接）**
 
-1. **页面上方是否「已连接」？** 未连接时 WebSocket 发不出去（HTTP 上传成功也不会出现在聊天里）。
-2. **dwm 等极简桌面：** 📎 可能弹不出文件选择框，可换用带完整文件对话框的浏览器。
-3. **Docker 报 `cannot save file`：** 重建容器（入口脚本会 `chown` 上传目录）：
-   ```bash
-   sudo docker compose -f docker-compose.host.yml up -d --build
-   ```
-4. **单文件超过上限** 会被拒绝；默认 500 MiB，可在 Hub 环境变量调大（见下）。
-5. 刷新页面后重试；仍失败请看浏览器弹窗里的 **HTTP 状态码** 或 `sudo docker logs lanroom --tail 20`。
+检查 Nginx 是否转发了 `Upgrade` / `Connection` 头，以及是否设置了 `proxy_set_header Host $host`。服务端日志中出现 `request origin not allowed` 说明 Host 没有透传。
 
-**调大上传上限（例如 2 GiB）：**
+**公网部署后所有人都提示「too many attempts」**
 
-```bash
-echo "LANROOM_MAX_UPLOAD_MB=2048" >> .env
-docker compose -f docker-compose.host.yml up -d
-```
+没有配置 `LANROOM_TRUSTED_PROXIES`，所有请求都被视为来自代理的同一个 IP。
 
-`curl -s http://127.0.0.1:8787/api/info | jq .maxUploadMb` 可查看当前生效值。
+**上传失败**
 
-### 文件存在哪？
+- 页面顶部需显示「已连接」，否则文件上传后无法发送消息。
+- 超过单文件上限会被拒绝，可调大 `LANROOM_MAX_UPLOAD_MB`，当前值可用 `curl -s <地址>/api/info | jq .maxUploadMb` 查看。
+- Docker 中报 `cannot save file` 时，重建容器即可，入口脚本会修正上传目录权限。
+- 查看日志：`docker logs lanroom --tail 50`。
 
-- 原生运行：`<系统临时目录>/three-end-transmission-uploads/`
-- Docker：卷 `lanroom-uploads` → `/data/uploads`
-- 过期或 Hub 重启后索引失效（MVP 行为，未做持久化聊天库）
+**`?auto=1` 是什么**
 
-### 端口被占用？
-
-```bash
-ss -tlnp | grep 8787
-# 结束占用进程后重启 Hub 或容器
-```
-
----
-
-## 本地开发
-
-```bash
-# 运行测试
-go test ./...
-
-# 启动开发 Hub
-go run . -port 8787
-```
-
-修改 `web/` 下前端文件后需 **重启 Hub**（静态资源通过 `go:embed` 打入二进制）。
+已在本机保存过昵称的设备，在地址后加 `?auto=1` 可跳过进入页，直接进入聊天。
 
 ---
 
 ## 许可证
 
-MIT — 见 [LICENSE](LICENSE)。
+[MIT](LICENSE)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,12 +31,17 @@ type Config struct {
 	Retention time.Duration
 	// PIN 房间口令，为空表示不启用。
 	PIN string
+	// PublicURL 公网访问地址（如 https://drop.example.com），为空表示局域网模式。
+	PublicURL string
+	// TrustedProxies 可信反向代理，只有来自这些地址的请求才读取 X-Forwarded-* 头。
+	TrustedProxies []*net.IPNet
 }
 
 type Server struct {
 	cfg      Config
 	hub      *hub.Hub
 	auth     *authState
+	proxies  proxyTrust
 	upgrader websocket.Upgrader
 	files    sync.Map // fileID -> fileRecord
 	uploads  sync.Map // uploadID -> *uploadSession
@@ -51,6 +57,7 @@ type fileRecord struct {
 
 type infoResponse struct {
 	JoinURL      string   `json:"joinUrl"`
+	PublicURL    string   `json:"publicUrl,omitempty"`
 	PINRequired  bool     `json:"pinRequired"`
 	Authorized   bool     `json:"authorized"`
 	RetentionSec int64    `json:"retentionSec"`
@@ -75,26 +82,40 @@ func New(cfg Config) *Server {
 		cfg.Retention = config.Retention()
 	}
 
-	return &Server{
-		cfg:  cfg,
-		hub:  hub.New(cfg.Retention),
-		auth: newAuthState(cfg.PIN),
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  4096,
-			WriteBufferSize: 4096,
-			CheckOrigin:     sameOrigin,
-		},
+	proxies := proxyTrust(cfg.TrustedProxies)
+	s := &Server{
+		cfg:     cfg,
+		hub:     hub.New(cfg.Retention),
+		auth:    newAuthState(cfg.PIN, proxies),
+		proxies: proxies,
 	}
+	s.upgrader = websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin:     s.sameOrigin,
+	}
+	return s
 }
 
 // sameOrigin 拒绝其他网站发起的 WebSocket（防止借用口令 cookie）；无 Origin 的非浏览器客户端放行。
-func sameOrigin(r *http.Request) bool {
+// 公网模式下也接受 PublicURL 的 host，反代没有透传 Host 头时仍能连接。
+func (s *Server) sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
 	u, err := url.Parse(origin)
-	return err == nil && strings.EqualFold(u.Host, r.Host)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	if s.cfg.PublicURL != "" {
+		pub, err := url.Parse(s.cfg.PublicURL)
+		return err == nil && strings.EqualFold(u.Host, pub.Host)
+	}
+	return false
 }
 
 func (s *Server) StartFileCleanup() {
@@ -166,9 +187,17 @@ func (s *Server) preferredJoinURL(lanIPs []string) string {
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	ips := AdvertiseIPv4Addresses(r)
-	urls := s.joinURLs(ips)
-	join := s.preferredJoinURL(ips)
+	var ips, urls []string
+	var join string
+	if s.cfg.PublicURL != "" {
+		// 公网模式：只展示公网地址，不暴露服务器内网 IP
+		urls = []string{s.cfg.PublicURL}
+		join = s.cfg.PublicURL
+	} else {
+		ips = AdvertiseIPv4Addresses(r)
+		urls = s.joinURLs(ips)
+		join = s.preferredJoinURL(ips)
+	}
 	authorized := s.auth.authorized(r)
 
 	// 已认证设备展示的二维码带上口令（URL fragment 不会发给服务器），扫码即可免输入
@@ -181,6 +210,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		LocalIPs:     ips,
 		URLs:         urls,
 		JoinURL:      join,
+		PublicURL:    s.cfg.PublicURL,
 		PINRequired:  s.auth.enabled(),
 		Authorized:   authorized,
 		RetentionSec: int64(s.cfg.Retention.Seconds()),
@@ -231,7 +261,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(q.Get("name"))
 	platform := hub.ParsePlatform(q.Get("platform"), r.UserAgent())
 
-	client := hub.NewClient(s.hub, conn, q.Get("id"), name, platform, ClientIP(r))
+	client := hub.NewClient(s.hub, conn, q.Get("key"), name, platform, s.proxies.ClientIP(r))
 	s.hub.Register(client)
 
 	go client.WritePump()

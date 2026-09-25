@@ -44,22 +44,70 @@ func ipsFromHTTPHost(host string) []string {
 	return nil
 }
 
-func ClientIP(r *http.Request) string {
-	return normalizeClientIP(rawClientIP(r))
+// proxyTrust 可信反向代理列表（LANROOM_TRUSTED_PROXIES）。
+// 转发头任何人都能伪造，只有 TCP 对端在列表内时才读取。
+type proxyTrust []*net.IPNet
+
+func (p proxyTrust) contains(ip net.IP) bool {
+	for _, n := range p {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
-func rawClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
+func peerIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return strings.TrimSpace(r.RemoteAddr)
 	}
 	return strings.Trim(host, "[]")
+}
+
+// fromProxy 请求是否直接来自可信代理。
+func (p proxyTrust) fromProxy(r *http.Request) bool {
+	ip := net.ParseIP(peerIP(r))
+	return ip != nil && p.contains(ip)
+}
+
+// ClientIP 返回用于展示的客户端 IP。
+func (p proxyTrust) ClientIP(r *http.Request) string {
+	return normalizeClientIP(p.rawClientIP(r))
+}
+
+// rawClientIP 返回真实客户端地址：不经可信代理时就是 TCP 对端；
+// 经可信代理时取 X-Forwarded-For 从右往左第一个非可信地址（左边的部分客户端可以随意伪造）。
+func (p proxyTrust) rawClientIP(r *http.Request) string {
+	peer := peerIP(r)
+	if !p.fromProxy(r) {
+		return peer
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		hops := strings.Split(xff, ",")
+		for i := len(hops) - 1; i >= 0; i-- {
+			hop := strings.TrimSpace(hops[i])
+			ip := net.ParseIP(hop)
+			if ip == nil {
+				break
+			}
+			if !p.contains(ip) || i == 0 {
+				return hop
+			}
+		}
+	}
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(xri) != nil {
+		return xri
+	}
+	return peer
+}
+
+// isHTTPS 请求在浏览器侧是否为 HTTPS（直连 TLS，或可信代理声明 X-Forwarded-Proto: https）。
+func (p proxyTrust) isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return p.fromProxy(r) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 // normalizeClientIP 优先展示局域网 IPv4，避免设备列表出现公网 IPv6。

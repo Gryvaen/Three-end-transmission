@@ -7,6 +7,8 @@ import (
 	"net/http/cookiejar"
 	"strings"
 	"testing"
+
+	"three-end-transmission/internal/config"
 )
 
 func TestAuthDisabledAllowsAll(t *testing.T) {
@@ -75,5 +77,55 @@ func TestAuthPIN(t *testing.T) {
 	}
 	if code := auth("2468"); code != http.StatusTooManyRequests {
 		t.Fatalf("after %d failures: want 429, got %d", authFailLimit, code)
+	}
+}
+
+// 放在反代后面：Secure cookie 取决于可信代理的 X-Forwarded-Proto，
+// 限速按真实客户端 IP，一人输错不能把经同一代理的其他人锁住。
+func TestAuthBehindProxy(t *testing.T) {
+	trusted, _ := config.ParseTrustedProxies("127.0.0.1,::1")
+	_, ts := newTestServer(t, Config{PIN: "correct-horse", TrustedProxies: trusted})
+
+	auth := func(pin, clientIP string) *http.Response {
+		body, _ := json.Marshal(map[string]string{"pin": pin})
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth", bytes.NewReader(body))
+		req.Header.Set("X-Forwarded-For", clientIP)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	resp := auth("correct-horse", "198.51.100.1")
+	if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 || !resp.Cookies()[0].Secure {
+		t.Fatalf("want Secure session cookie, got %d %+v", resp.StatusCode, resp.Cookies())
+	}
+
+	for i := 0; i < authFailLimit; i++ {
+		auth("wrong", "203.0.113.66")
+	}
+	if code := auth("correct-horse", "203.0.113.66").StatusCode; code != http.StatusTooManyRequests {
+		t.Fatalf("attacker should be rate limited, got %d", code)
+	}
+	if code := auth("correct-horse", "198.51.100.2").StatusCode; code != http.StatusOK {
+		t.Fatalf("other clients behind the same proxy must not be locked out, got %d", code)
+	}
+}
+
+func TestAuthCookieNotSecureOnPlainHTTP(t *testing.T) {
+	_, ts := newTestServer(t, Config{PIN: "2468"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth", strings.NewReader(`{"pin":"2468"}`))
+	// 未配置可信代理：伪造的 X-Forwarded-Proto 无效
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(resp.Cookies()) != 1 || resp.Cookies()[0].Secure {
+		t.Fatalf("LAN http cookie must not be Secure: %+v", resp.Cookies())
 	}
 }
