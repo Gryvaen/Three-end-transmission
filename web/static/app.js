@@ -113,6 +113,9 @@ const els = {
   imageViewerImg: document.getElementById("image-viewer-img"),
   imageViewerDownload: document.getElementById("image-viewer-download"),
   imageViewerClose: document.getElementById("image-viewer-close"),
+  dmHint: document.getElementById("dm-hint"),
+  peerCount: document.getElementById("peer-count"),
+  chatTitle: document.getElementById("chat-title"),
 };
 
 let ws = null;
@@ -129,6 +132,8 @@ const activeUploads = new Set();
 let sendTarget = null;
 /** 最近一次 presence 的在线设备 */
 let onlineUsers = [];
+/** 上次渲染的设备列表签名：内容没变就不重绘，避免 presence 广播打断手机上的点击 */
+let devicesSignature = "";
 
 // --- 本地存储（隐私模式下可能不可用） ---
 
@@ -357,6 +362,17 @@ function setConnected(online) {
 /** 渲染左侧在线设备列表（由 presence 消息驱动）；点击其他设备切换私信目标 */
 function renderDevices(users) {
   onlineUsers = users;
+  const peers = users.filter((u) => u.id !== deviceId).length;
+  els.dmHint.classList.toggle("hidden", peers === 0);
+  els.peerCount.classList.toggle("hidden", peers === 0);
+  els.peerCount.textContent = String(peers);
+
+  const signature = JSON.stringify(users.map((u) => [u.id, u.name, u.ip, u.platform]));
+  if (signature === devicesSignature) {
+    renderTargetBar();
+    return;
+  }
+  devicesSignature = signature;
   els.deviceList.innerHTML = "";
   els.onlineCount.textContent = String(users.length);
 
@@ -417,6 +433,8 @@ function renderTargetBar() {
   const target = sendTarget;
   els.targetBar.classList.toggle("hidden", !target);
   els.dropTarget.textContent = target ? target.name : "群聊";
+  els.chatTitle.textContent = target ? `私聊 · ${target.name}` : "群聊";
+  els.chatTitle.classList.toggle("private", !!target);
   if (!target) return;
   const online = onlineUsers.some((u) => u.id === target.id);
   els.targetName.textContent = target.name;
@@ -589,6 +607,14 @@ function appendMessage(msg, isSelf) {
 
   let body = "";
   const payload = msg.payload || {};
+  // 别人发的消息：点发送者名字或"私信我"即可私聊回复
+  const replyable = !isSelf && msg.from?.id && msg.from.id !== deviceId;
+  const replyAttrs = replyable
+    ? ` data-reply-id="${escapeAttr(msg.from.id)}" data-reply-name="${escapeAttr(fromName)}" title="私聊回复 ${escapeAttr(fromName)}"`
+    : "";
+  const senderHTML = replyable
+    ? `<span class="msg-sender reply"${replyAttrs}>${escapeHTML(fromName)}</span>`
+    : escapeHTML(fromName);
   const saveInstead = payload.kind === "image" && !canCopyImages();
   const copyLabel = saveInstead ? "保存" : "复制";
   const copyTitle = saveInstead ? "保存图片" : "复制此条";
@@ -626,7 +652,7 @@ function appendMessage(msg, isSelf) {
 
   wrapper.innerHTML = `
     <div class="msg-meta">
-      <span>${escapeHTML(fromName)} · ${time}${privateTag ? ` · <span class="msg-private-tag">${escapeHTML(privateTag)}</span>` : ""}</span>
+      <span>${senderHTML} · ${time}${privateTag ? ` · <span class="msg-private-tag${replyable ? " reply" : ""}"${replyAttrs}>${escapeHTML(privateTag)}</span>` : ""}</span>
       <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="${copyTitle}">${copyLabel}</button>
     </div>
     ${body}
@@ -1123,6 +1149,7 @@ function leaveChat() {
   selfDevice = null;
   chatLog = [];
   setSendTarget(null);
+  devicesSignature = "";
   activeUploads.forEach((c) => c.abort());
   document.body.classList.remove("in-chat");
   document.documentElement.classList.remove("in-chat");
@@ -1206,6 +1233,13 @@ els.messages.addEventListener("click", (e) => {
   if (copyBtn) {
     e.preventDefault();
     copyOneMessage(Number(copyBtn.dataset.msgIdx));
+    return;
+  }
+
+  const reply = e.target.closest("[data-reply-id]");
+  if (reply) {
+    setSendTarget({ id: reply.dataset.replyId, name: reply.dataset.replyName });
+    els.messageInput.focus();
     return;
   }
 

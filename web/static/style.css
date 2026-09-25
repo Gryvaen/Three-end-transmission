@@ -684,6 +684,44 @@ a.file-card.is-downloading {
 }
 
 /* --- 指定设备发送 --- */
+.dm-hint {
+  margin: 0;
+  padding: 8px 16px 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+#chat-title.private {
+  color: var(--private);
+}
+
+.header-devices-btn {
+  position: relative;
+}
+
+.peer-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--private);
+  color: #111;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.msg-private-tag.reply,
+.msg-sender.reply {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .device-item.selectable {
   cursor: pointer;
   border: 1px solid transparent;

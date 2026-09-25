@@ -27,13 +27,16 @@
     </section>
 
     <!-- 主界面 -->
-    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
     <section id="chat-screen" class="screen hidden">
+      <!-- 遮罩必须在 #chat-screen 内：移动端 #chat-screen 是 position:fixed（独立层叠上下文），
+           放在外面时 z-index 会盖住整个聊天界面，包括抽屉里的设备列表 -->
+      <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
       <aside class="sidebar" id="sidebar">
         <header class="sidebar-header">
           <h2>在线设备</h2>
           <span id="online-count" class="badge">0</span>
         </header>
+        <p id="dm-hint" class="dm-hint hidden">点其他设备可私聊</p>
         <ul id="device-list"></ul>
         <div class="sidebar-footer">
           <button id="info-panel-btn" type="button">连接信息</button>
@@ -44,9 +47,9 @@
       <main class="chat-main" id="chat-main">
         <header class="chat-header">
           <div class="chat-header-left">
-            <button id="toggle-devices-btn" type="button" class="icon-btn header-devices-btn" title="在线设备">👥</button>
+            <button id="toggle-devices-btn" type="button" class="icon-btn header-devices-btn" title="在线设备 / 私聊">👥<span id="peer-count" class="peer-count hidden"></span></button>
             <div>
-              <h2>群聊</h2>
+              <h2 id="chat-title">群聊</h2>
               <p id="self-label" class="self-label"></p>
             </div>
           </div>
