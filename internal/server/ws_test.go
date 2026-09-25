@@ -115,27 +115,39 @@ func TestDirectMessageDelivery(t *testing.T) {
 	}
 }
 
-func TestSameDeviceIDReplacesOldConnection(t *testing.T) {
+// 同一浏览器的多个标签页共用设备 ID：都应保持在线、都能收到私信，不能互相踢掉
+// （之前的"替换旧连接"会让两个标签页无限互踢重连）。
+func TestSameDeviceIDMultipleConnections(t *testing.T) {
 	_, ts := newTestServer(t, Config{})
 
 	id := uuid.NewString()
-	old := dialPeer(t, ts, id, "phone")
+	tab1 := dialPeer(t, ts, id, "pc")
+	tab2 := dialPeer(t, ts, id, "pc")
+	phone := dialPeer(t, ts, uuid.NewString(), "phone")
 
-	fresh := dialPeer(t, ts, id, "phone")
-	pres, ok := fresh.next("presence", 2*time.Second)
-	if !ok || len(pres.Users) != 1 || pres.Users[0].ID != id {
-		t.Fatalf("presence should list the device once: %+v", pres.Users)
+	pres, ok := phone.next("presence", 2*time.Second)
+	if !ok || len(pres.Users) != 2 {
+		t.Fatalf("presence should list pc once plus phone: %+v", pres.Users)
+	}
+	var info infoResponse
+	doJSON(t, http.MethodGet, ts.URL+"/api/info", nil, &info)
+	if info.ClientCount != 2 {
+		t.Fatalf("clientCount should count devices, got %d", info.ClientCount)
 	}
 
-	// 旧连接应被服务端关闭
-	_ = old.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for {
-		if _, _, err := old.conn.ReadMessage(); err != nil {
-			if ne, ok := err.(interface{ Timeout() bool }); ok && ne.Timeout() {
-				t.Fatal("old connection was not closed")
-			}
-			break
+	// 两个标签页都没被关闭，且都收到发给该设备的私信
+	phone.send([]string{id}, "hi-tabs")
+	for i, tab := range []*wsPeer{tab1, tab2} {
+		if msg, ok := tab.next("message", 2*time.Second); !ok || msg.Payload.Content != "hi-tabs" {
+			t.Fatalf("tab%d should stay connected and receive the private message: ok=%v", i+1, ok)
 		}
+	}
+
+	// 关闭一个标签页后设备仍在线
+	tab1.conn.Close()
+	pres, ok = phone.next("presence", 2*time.Second)
+	if !ok || len(pres.Users) != 2 {
+		t.Fatalf("device should stay online while another tab is connected: %+v", pres.Users)
 	}
 }
 

@@ -112,24 +112,14 @@ func New(historyTTL time.Duration) *Hub {
 	}
 }
 
-// Register 加入新连接；同一设备 ID 的旧连接（刷新、重连残留）会被替换掉。
+// Register 加入新连接。同一浏览器的多个标签页共用设备 ID，允许同时在线、都能收到消息；
+// 不能踢掉同 ID 的旧连接，否则两个标签页会互相踢、无限重连。
+// 刷新留下的旧连接由浏览器正常关闭，异常断开的由 ping/pong 超时清理。
 func (h *Hub) Register(client *Client) {
-	var stale []*Client
 	h.mu.Lock()
-	for c := range h.clients {
-		if c.device.ID == client.device.ID {
-			stale = append(stale, c)
-			delete(h.clients, c)
-			close(c.send)
-		}
-	}
 	h.clients[client] = true
 	h.known[client.device.ID] = client.device
 	h.mu.Unlock()
-
-	for _, c := range stale {
-		_ = c.conn.Close()
-	}
 
 	h.sendWelcome(client)
 	h.sendHistory(client)
@@ -195,18 +185,23 @@ func (h *Hub) Unregister(client *Client) {
 	slog.Info("client left", "name", client.device.Name, "id", client.device.ID)
 }
 
+// ClientCount 在线设备数（同一设备的多个标签页只算一次）。
 func (h *Hub) ClientCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.clients)
+	return len(h.devices())
 }
 
+// devices 在线设备列表，按设备 ID 去重（一台设备开多个标签页只算一次）。
 func (h *Hub) devices() []Device {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	seen := make(map[string]struct{}, len(h.clients))
 	list := make([]Device, 0, len(h.clients))
 	for c := range h.clients {
+		if _, dup := seen[c.device.ID]; dup {
+			continue
+		}
+		seen[c.device.ID] = struct{}{}
 		list = append(list, c.device)
 	}
 	return list
