@@ -11,68 +11,44 @@ const UPLOAD_KEY_PREFIX = "lanroom-upload:";
 const UPLOAD_MAX_RETRIES = 10;
 const FILE_ID_RE = /^[a-f0-9]{32}$/;
 
-const COMPOSER_PLACEHOLDER = "输入消息…，可粘贴图片";
+/** 手机布局断点，与 style.css 中的 @media (max-width: 760px) 保持一致 */
+const mobileLayout = window.matchMedia("(max-width: 760px)");
 
-const platformIcons = {
-  android: "🤖",
-  windows: "🪟",
-  linux: "🐧",
-  ios: "📱",
-  macos: "🍎",
-  unknown: "💻",
-};
-
-/** 各平台 UI 文案与主题色 */
+/** 各平台显示名、设备图标（index.html 里的 #i-phone / #i-laptop / #i-desktop）与默认昵称 */
 const platformUI = {
-  android: {
-    badge: "Android 版",
-    subtitle: "Material 风格",
-    defaultName: "Android 设备",
-    namePlaceholder: "例如：小明的手机",
-    composerPlaceholder: "发消息…，可粘贴图片",
-    themeColor: "#111b21",
-  },
-  ios: {
-    badge: "iOS 版",
-    subtitle: "轻触即用",
-    defaultName: "iPhone / iPad",
-    namePlaceholder: "例如：iPhone",
-    composerPlaceholder: "iMessage…，可粘贴图片",
-    themeColor: "#000000",
-  },
-  windows: {
-    badge: "Windows 版",
-    subtitle: "Fluent 风格",
-    defaultName: "Windows PC",
-    namePlaceholder: "例如：DESKTOP-PC",
-    composerPlaceholder: COMPOSER_PLACEHOLDER,
-    themeColor: "#202020",
-  },
-  linux: {
-    badge: "Linux 版",
-    subtitle: "GNOME 风格",
-    defaultName: "Linux 设备",
-    namePlaceholder: "例如：arch-pc",
-    composerPlaceholder: COMPOSER_PLACEHOLDER,
-    themeColor: "#241f31",
-  },
-  macos: {
-    badge: "macOS 版",
-    subtitle: "桌面风格",
-    defaultName: "Mac",
-    namePlaceholder: "例如：MacBook",
-    composerPlaceholder: COMPOSER_PLACEHOLDER,
-    themeColor: "#1e1e1e",
-  },
-  unknown: {
-    badge: "网页版",
-    subtitle: "局域网聊天式互传 · 浏览器打开即用",
-    defaultName: "我的设备",
-    namePlaceholder: "例如：我的设备",
-    composerPlaceholder: COMPOSER_PLACEHOLDER,
-    themeColor: "#0f1419",
-  },
+  android: { label: "Android", icon: "phone", defaultName: "Android 设备", namePlaceholder: "例如：小明的手机" },
+  ios: { label: "iOS", icon: "phone", defaultName: "iPhone / iPad", namePlaceholder: "例如：小红的 iPhone" },
+  windows: { label: "Windows", icon: "desktop", defaultName: "Windows PC", namePlaceholder: "例如：客厅台式机" },
+  linux: { label: "Linux", icon: "laptop", defaultName: "Linux 设备", namePlaceholder: "例如：arch-pc" },
+  macos: { label: "macOS", icon: "laptop", defaultName: "Mac", namePlaceholder: "例如：MacBook" },
+  unknown: { label: "未知系统", icon: "desktop", defaultName: "我的设备", namePlaceholder: "例如：我的设备" },
 };
+
+function platformOf(key) {
+  return platformUI[key] ? key : "unknown";
+}
+
+function iconSVG(name) {
+  return `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
+/** 设备头像：单色设备图标（手机 / 笔记本 / 台式机），可带在线绿点 */
+function avatarHTML(platform, { size = "", presence = false } = {}) {
+  const key = platformOf(platform);
+  return `<span class="avatar${size ? ` avatar-${size}` : ""}" title="${platformUI[key].label}">${iconSVG(platformUI[key].icon)}${presence ? '<span class="presence"></span>' : ""}</span>`;
+}
+
+/** 文件图标：单色线框折角文档，中间写扩展名（样式见 .ficon） */
+function fileIconSVG(name) {
+  const m = /\.([a-z0-9]{1,8})$/i.exec(String(name || ""));
+  const label = (m ? m[1] : "file").slice(0, 4).toUpperCase();
+  const fontSize = label.length > 3 ? 7 : 8;
+  return `<svg class="ficon" viewBox="0 0 36 44" aria-hidden="true">
+    <path class="ficon-body" d="M7 1.5h15.5l9 9V39a3.5 3.5 0 0 1-3.5 3.5H7A3.5 3.5 0 0 1 3.5 39V5A3.5 3.5 0 0 1 7 1.5z"/>
+    <path class="ficon-fold" d="M22.5 1.5V7a3.5 3.5 0 0 0 3.5 3.5h5.5"/>
+    <text class="ficon-text" x="17.5" y="30" text-anchor="middle" font-size="${fontSize}">${escapeHTML(label)}</text>
+  </svg>`;
+}
 
 // DOM 引用集中管理，避免重复 querySelector
 const els = {
@@ -118,6 +94,24 @@ const els = {
   dmHint: document.getElementById("dm-hint"),
   peerCount: document.getElementById("peer-count"),
   chatTitle: document.getElementById("chat-title"),
+  chatMeta: document.getElementById("chat-meta"),
+  dmBadge: document.getElementById("dm-badge"),
+  groupItem: document.getElementById("group-item"),
+  groupSub: document.getElementById("group-sub"),
+  closeDevicesBtn: document.getElementById("close-devices-btn"),
+  backGroupBtn: document.getElementById("back-group-btn"),
+  selfAvatar: document.getElementById("self-avatar"),
+  selfSub: document.getElementById("self-sub"),
+  roomHost: document.getElementById("room-host"),
+  joinHost: document.getElementById("join-host"),
+  joinOnline: document.getElementById("join-online"),
+  targetNote: document.getElementById("target-note"),
+  sideQr: document.getElementById("side-qr"),
+  sideUrl: document.getElementById("side-url"),
+  sideCopyUrl: document.getElementById("side-copy-url"),
+  sidePin: document.getElementById("side-pin"),
+  transferList: document.getElementById("transfer-list"),
+  transferEmpty: document.getElementById("transfer-empty"),
 };
 
 let ws = null;
@@ -136,6 +130,12 @@ let sendTarget = null;
 let onlineUsers = [];
 /** 上次渲染的设备列表签名：内容没变就不重绘，避免 presence 广播打断手机上的点击 */
 let devicesSignature = "";
+/** /api/info 的最近结果（记录保留时长、口令等），进入聊天室时加载 */
+let roomInfo = null;
+/** 本次会话的传输记录（右栏"传输"列表），新的在前 */
+let transfers = [];
+let transferSeq = 0;
+const TRANSFER_LIMIT = 8;
 
 // --- 本地存储（隐私模式下可能不可用） ---
 
@@ -195,12 +195,10 @@ function detectPlatform() {
   return "unknown";
 }
 
-/** 移动端：动态计算输入栏高度与键盘偏移 */
+/** 手机布局：输入栏固定在底部，动态计算它的高度与软键盘偏移（窄窗口的桌面浏览器同样适用） */
 let mobileViewportInited = false;
 
 function initMobileViewportFix() {
-  const platform = detectPlatform();
-  if (platform !== "android" && platform !== "ios") return;
   if (mobileViewportInited) return;
 
   const composer = document.querySelector(".composer");
@@ -260,31 +258,19 @@ function addJoinHint(id, text) {
   hint.id = id;
   hint.className = "browser-hint";
   hint.textContent = text;
-  card.insertBefore(hint, card.querySelector(".subtitle"));
+  card.insertBefore(hint, card.querySelector(".room-chip"));
 }
 
-/** 按平台应用主题、文案与布局（html[data-platform]） */
+/** 按平台设置文案与默认值（html[data-platform]，Linux 下载方式也依赖它）；配色统一，跟随系统深浅色 */
 function initPlatformUI() {
   const platform = detectPlatform();
   const ui = platformUI[platform] || platformUI.unknown;
 
   document.documentElement.dataset.platform = platform;
 
-  if (els.platformBadge) els.platformBadge.textContent = ui.badge;
-
-  const subtitle = document.querySelector(".subtitle");
-  if (subtitle) subtitle.textContent = ui.subtitle;
-
+  if (els.platformBadge) els.platformBadge.textContent = `已识别为 ${ui.label} · 其他设备会看到这个名字`;
+  els.joinHost.textContent = location.host;
   els.deviceName.placeholder = ui.namePlaceholder;
-  els.messageInput.placeholder = ui.composerPlaceholder;
-
-  let themeMeta = document.querySelector('meta[name="theme-color"]');
-  if (!themeMeta) {
-    themeMeta = document.createElement("meta");
-    themeMeta.name = "theme-color";
-    document.head.appendChild(themeMeta);
-  }
-  themeMeta.content = ui.themeColor;
 
   if (platform === "ios") {
     let capable = document.querySelector('meta[name="apple-mobile-web-app-capable"]');
@@ -318,8 +304,13 @@ function isMobilePlatform() {
   return p === "android" || p === "ios";
 }
 
+/** 设备列表是否以底部面板形式出现（手机布局）；宽屏时它常驻左栏 */
+function isMobileLayout() {
+  return mobileLayout.matches;
+}
+
 function setDevicesPanel(open) {
-  if (!isMobilePlatform()) return;
+  if (open && !isMobileLayout()) return;
   els.sidebar?.classList.toggle("open", open);
   els.sidebarBackdrop?.classList.toggle("visible", open);
 }
@@ -370,6 +361,28 @@ function setConnected(online) {
   els.attachBtn.disabled = !online;
 }
 
+function formatRetention(sec) {
+  if (!sec) return "";
+  if (sec % 3600 === 0) return `${sec / 3600} 小时`;
+  if (sec >= 60) return `${Math.round(sec / 60)} 分钟`;
+  return `${sec} 秒`;
+}
+
+/** 头部副标题：群聊显示在线设备数与记录保留时长，私聊显示对方系统与 IP */
+function renderChatMeta() {
+  if (sendTarget) {
+    const peer = onlineUsers.find((u) => u.id === sendTarget.id);
+    els.chatMeta.textContent = peer
+      ? `· ${platformUI[platformOf(peer.platform)].label} · ${peer.ip || "未知 IP"}`
+      : "· 对方已离线";
+    return;
+  }
+  const parts = [`${onlineUsers.length} 台设备在线`];
+  const retention = formatRetention(roomInfo?.retentionSec);
+  if (retention) parts.push(`记录保留 ${retention}`);
+  els.chatMeta.textContent = `· ${parts.join(" · ")}`;
+}
+
 /** 渲染左侧在线设备列表（由 presence 消息驱动）；点击其他设备切换私信目标 */
 function renderDevices(users) {
   onlineUsers = users;
@@ -377,6 +390,7 @@ function renderDevices(users) {
   els.dmHint.classList.toggle("hidden", peers === 0);
   els.peerCount.classList.toggle("hidden", peers === 0);
   els.peerCount.textContent = String(peers);
+  els.groupSub.textContent = `所有 ${users.length} 台设备`;
 
   const signature = JSON.stringify(users.map((u) => [u.id, u.name, u.ip, u.platform]));
   if (signature === devicesSignature) {
@@ -402,29 +416,31 @@ function renderDevices(users) {
       displayName = `${displayName} #${nameIndex[displayName]}`;
     }
 
-    const ip = user.ip || "未知";
-
-    const platformKey = String(user.platform || "unknown");
-    const icon = platformIcons[platformKey] || platformIcons.unknown;
+    const ip = user.ip || "未知 IP";
+    const platformKey = platformOf(user.platform);
     const isSelf = user.id === deviceId;
 
+    // 本机只展示；其他设备是按钮，点一下即私聊
     const li = document.createElement("li");
-    li.className = "device-item";
+    const item = document.createElement(isSelf ? "div" : "button");
+    item.className = "device-item";
     if (!isSelf) {
-      li.classList.add("selectable");
-      li.dataset.deviceId = user.id;
-      li.dataset.deviceName = displayName;
-      li.title = "点击私信此设备";
-      li.classList.toggle("selected", sendTarget?.id === user.id);
+      item.type = "button";
+      item.classList.add("selectable");
+      item.dataset.deviceId = user.id;
+      item.dataset.deviceName = displayName;
+      item.title = "点击私聊此设备";
+      item.classList.toggle("selected", sendTarget?.id === user.id);
     }
-    li.innerHTML = `
-      <span class="device-icon">${icon}</span>
-      <div>
-        <div class="device-name">${escapeHTML(displayName)}${isSelf ? ' <span class="device-self">（本机）</span>' : ""}</div>
-        <div class="device-ip">${escapeHTML(ip)}</div>
-        <div class="device-platform">${escapeHTML(platformKey)}</div>
-      </div>
+    item.innerHTML = `
+      ${avatarHTML(platformKey, { presence: true })}
+      <span class="device-text">
+        <span class="device-name"><span class="device-name-text">${escapeHTML(displayName)}</span>${isSelf ? '<span class="self-chip">本机</span>' : ""}</span>
+        <span class="device-sub mono">${escapeHTML(platformUI[platformKey].label)} · ${escapeHTML(ip)}</span>
+      </span>
+      ${isSelf ? "" : iconSVG("check-circle").replace('class="icon"', 'class="icon check-icon"')}
     `;
+    li.appendChild(item);
     els.deviceList.appendChild(li);
   });
 
@@ -434,23 +450,32 @@ function renderDevices(users) {
 /** 设置 / 取消私信目标 */
 function setSendTarget(target) {
   sendTarget = target;
-  els.deviceList.querySelectorAll(".device-item.selectable").forEach((li) => {
-    li.classList.toggle("selected", li.dataset.deviceId === target?.id);
+  els.deviceList.querySelectorAll(".device-item.selectable").forEach((item) => {
+    item.classList.toggle("selected", item.dataset.deviceId === target?.id);
   });
   renderTargetBar();
 }
 
+/** 按发送目标更新标题、输入区目标栏与私聊配色 */
 function renderTargetBar() {
   const target = sendTarget;
-  els.targetBar.classList.toggle("hidden", !target);
+  const online = !target || onlineUsers.some((u) => u.id === target.id);
+  els.chatMain.classList.toggle("dm", !!target);
+  els.groupItem.classList.toggle("selected", !target);
+  els.dmBadge.classList.toggle("hidden", !target);
   els.dropTarget.textContent = target ? target.name : "群聊";
-  els.chatTitle.textContent = target ? `私聊 · ${target.name}` : "群聊";
-  els.chatTitle.classList.toggle("private", !!target);
-  if (!target) return;
-  const online = onlineUsers.some((u) => u.id === target.id);
-  els.targetName.textContent = target.name;
+  els.chatTitle.textContent = target ? target.name : "群聊";
+  els.targetName.textContent = target ? target.name : `群聊（${onlineUsers.length} 台）`;
+  els.targetNote.classList.toggle("hidden", !target);
+  els.targetClear.classList.toggle("hidden", !target);
   els.targetOffline.classList.toggle("hidden", online);
   els.targetBar.classList.toggle("offline", !online);
+  els.messageInput.placeholder = target
+    ? `私聊 ${target.name}`
+    : isMobileLayout()
+      ? "发到群聊"
+      : "输入消息，可粘贴图片或把文件拖到这里";
+  renderChatMeta();
 }
 
 /** 当前发送目标的 to 字段（群发返回 undefined） */
@@ -541,11 +566,13 @@ async function copyToClipboard(text) {
 
 function flashCopyBtn(btn, ok, okLabel = "已复制", failLabel = "失败") {
   if (!btn) return;
-  const prev = btn.textContent;
-  btn.textContent = ok ? okLabel : failLabel;
+  // 带图标的按钮只换文字部分
+  const label = btn.querySelector(".btn-label") || btn;
+  const prev = label.textContent;
+  label.textContent = ok ? okLabel : failLabel;
   btn.disabled = true;
   setTimeout(() => {
-    btn.textContent = prev;
+    label.textContent = prev;
     btn.disabled = false;
   }, 1600);
 }
@@ -589,15 +616,24 @@ function canCopyImages() {
   return window.isSecureContext && !!navigator.clipboard?.write && typeof ClipboardItem !== "undefined";
 }
 
-/** 私信标签文字：自己发出显示接收者，收到显示"私信我" */
+/** 私信标签文字：自己发出显示接收者，收到显示"私聊给你" */
 function privateLabel(msg, isSelf) {
   if (!msg.to?.length) return "";
-  if (!isSelf) return "私信我";
+  if (!isSelf) return "私聊给你";
   const names = (msg.recipients || []).map((d) => {
     const online = onlineUsers.find((u) => u.id === d.id);
     return d.name || online?.name || "未知设备";
   });
-  return `私信 → ${names.join("、") || "未知设备"}`;
+  return `私聊 → ${names.join("、") || "未知设备"}`;
+}
+
+/** 文件卡片内容：类型图标 + 文件名 + 大小（下载卡片与上传卡片共用） */
+function fileRowHTML(name, sizeText, trailing = "") {
+  return `${fileIconSVG(name)}
+    <span class="file-info">
+      <span class="file-name">${escapeHTML(name)}</span>
+      <span class="file-size mono">${sizeText}</span>
+    </span>${trailing}`;
 }
 
 /**
@@ -625,7 +661,7 @@ function appendMessage(msg, isSelf) {
     : "";
   const senderHTML = replyable
     ? `<span class="msg-sender reply"${replyAttrs}>${escapeHTML(fromName)}</span>`
-    : escapeHTML(fromName);
+    : `<span class="msg-sender">${escapeHTML(fromName)}</span>`;
   const saveInstead = payload.kind === "image" && !canCopyImages();
   const copyLabel = saveInstead ? "保存" : "复制";
   const copyTitle = saveInstead ? "保存图片" : "复制此条";
@@ -641,32 +677,31 @@ function appendMessage(msg, isSelf) {
   } else if (payload.kind === "file") {
     const name = payload.meta?.name || "文件";
     const size = payload.meta?.size ? formatSize(payload.meta.size) : "";
-    const safeName = escapeHTML(name);
     const fileUrl = safeFileURL(payload.fileId);
     body = fileUrl
-      ? `
-      <div class="msg-bubble file-bubble">
-        <a class="file-card file-download" href="${escapeAttr(fileUrl)}" download="${escapeAttr(name)}"
-           data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}">
-          <span class="file-icon" aria-hidden="true">📎</span>
-          <div class="file-info">
-            <div class="file-name">${safeName}</div>
-            <small class="file-size">${size}</small>
-            <span class="download-label">下载</span>
-          </div>
-        </a>
-      </div>`
+      ? `<div class="msg-bubble file-bubble"><a class="file-card file-download" href="${escapeAttr(fileUrl)}" download="${escapeAttr(name)}"
+           data-file-id="${escapeAttr(payload.fileId)}" data-file-name="${escapeAttr(name)}" title="下载 ${escapeAttr(name)}">${fileRowHTML(
+             name,
+             size,
+             `<span class="download-btn" aria-hidden="true">${iconSVG("download")}</span>`
+           )}</a></div>`
       : `<div class="msg-bubble">[文件不可用]</div>`;
   } else {
     body = `<div class="msg-bubble">[不支持的消息类型]</div>`;
   }
 
+  // 自己的消息只显示时间；别人的消息带发送者名字与设备头像
+  const metaParts = isSelf ? [time] : [senderHTML, time];
   wrapper.innerHTML = `
-    <div class="msg-meta">
-      <span>${senderHTML} · ${time}${privateTag ? ` · <span class="msg-private-tag${replyable ? " reply" : ""}"${replyAttrs}>${escapeHTML(privateTag)}</span>` : ""}</span>
-      <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="${copyTitle}">${copyLabel}</button>
+    ${isSelf ? "" : avatarHTML(msg.from?.platform, { size: "sm" })}
+    <div class="msg-body">
+      <div class="msg-meta">
+        <span>${metaParts.join(" · ")}</span>
+        ${privateTag ? `<span class="msg-private-tag${replyable ? " reply" : ""}"${replyAttrs}>${iconSVG("lock")}${escapeHTML(privateTag)}</span>` : ""}
+        <button type="button" class="msg-copy-btn" data-msg-idx="${logIdx}" title="${copyTitle}">${copyLabel}</button>
+      </div>
+      ${body}
     </div>
-    ${body}
   `;
 
   // 上传中的占位条目始终留在底部，新消息插在它们之前
@@ -784,6 +819,7 @@ function connect(name) {
     if (data.type === "welcome") {
       selfDevice = data.device || null;
       deviceId = selfDevice?.id || null;
+      renderSelf();
       return;
     }
 
@@ -801,6 +837,16 @@ function connect(name) {
     if (data.type === "message") {
       const isSelf = selfDevice && data.from?.id === selfDevice.id;
       appendMessage(data, isSelf);
+      const kind = data.payload?.kind;
+      if (!isSelf && (kind === "file" || kind === "image")) {
+        addTransfer({
+          name: data.payload.meta?.name || (kind === "image" ? "图片" : "文件"),
+          state: "done",
+          label: "已接收",
+          pct: 100,
+          detail: `${data.payload.meta?.size ? `${formatSize(data.payload.meta.size)} · ` : ""}来自 ${data.from?.name || "未知设备"}`,
+        });
+      }
     }
   };
 }
@@ -999,26 +1045,37 @@ function createUploadCard(file, targetName) {
   const el = document.createElement("div");
   el.className = `msg self upload-pending${targetName ? " private" : ""}`;
   el.innerHTML = `
-    <div class="msg-meta"><span>上传中${targetName ? ` · <span class="msg-private-tag">私信 → ${escapeHTML(targetName)}</span>` : ""}</span></div>
-    <div class="msg-bubble upload-card">
-      <div class="upload-name">📎 ${escapeHTML(file.name)}</div>
-      <div class="upload-progress"><div class="upload-progress-bar"></div></div>
-      <div class="upload-status">
-        <span class="upload-text">准备中…</span>
-        <button type="button" class="upload-cancel">取消</button>
+    <div class="msg-body">
+      <div class="msg-meta"><span>上传中</span>${targetName ? `<span class="msg-private-tag">${iconSVG("lock")}私聊 → ${escapeHTML(targetName)}</span>` : ""}</div>
+      <div class="msg-bubble upload-card">
+        <div class="file-card">${fileRowHTML(
+          file.name,
+          `<span class="upload-bytes">0 B / ${formatSize(file.size)}</span>`,
+          `<button type="button" class="icon-btn upload-cancel" title="取消上传" aria-label="取消上传">${iconSVG("x")}</button>`
+        )}</div>
+        <div class="upload-progress"><div class="upload-progress-bar"></div></div>
+        <div class="upload-status mono">
+          <span class="upload-text">准备中…</span>
+          <span class="upload-eta"></span>
+        </div>
       </div>
     </div>`;
   els.messages.appendChild(el);
   scrollToBottom();
 
+  const card = el.querySelector(".upload-card");
   const bar = el.querySelector(".upload-progress-bar");
+  const bytesEl = el.querySelector(".upload-bytes");
   const text = el.querySelector(".upload-text");
+  const eta = el.querySelector(".upload-eta");
+  const transfer = addTransfer({ name: file.name, state: "up", label: "准备中", pct: 0, detail: formatSize(file.size) });
   let lastBytes = 0;
   let lastTime = performance.now();
   let speed = 0;
 
   return {
     el,
+    transfer,
     cancelBtn: el.querySelector(".upload-cancel"),
     update(bytes, note) {
       const pct = file.size ? Math.min(100, (bytes / file.size) * 100) : 100;
@@ -1029,13 +1086,69 @@ function createUploadCard(file, targetName) {
         lastBytes = bytes;
         lastTime = now;
       }
-      text.textContent =
-        note || `${pct.toFixed(0)}% · ${formatSize(bytes)} / ${formatSize(file.size)}${speed > 0 ? ` · ${formatSize(speed)}/s` : ""}`;
+      const sizes = `${formatSize(bytes)} / ${formatSize(file.size)}`;
+      const speedText = speed > 0 ? `${formatSize(speed)}/s` : "";
+      const remaining = speed > 0 ? Math.ceil((file.size - bytes) / speed) : 0;
+      bytesEl.textContent = sizes;
+      card.classList.toggle("retrying", !!note);
+      text.textContent = note || [`${pct.toFixed(0)}%`, speedText].filter(Boolean).join(" · ");
+      eta.textContent = !note && remaining > 0 ? `剩余约 ${formatDuration(remaining)}` : "";
+      updateTransfer(transfer, {
+        state: note ? "retry" : "up",
+        label: note ? `重试中 ${pct.toFixed(0)}%` : `上传中 ${pct.toFixed(0)}%`,
+        pct,
+        detail: note || [sizes, speedText].filter(Boolean).join(" · "),
+      });
     },
     remove() {
       el.remove();
     },
   };
+}
+
+function formatDuration(sec) {
+  if (sec < 60) return `${sec} 秒`;
+  if (sec < 3600) return `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+  return `${Math.floor(sec / 3600)} 小时 ${Math.floor((sec % 3600) / 60)} 分`;
+}
+
+// --- 传输列表（宽屏右栏） ---
+
+const TRANSFER_ICONS = { up: "up", retry: "pause", done: "check", failed: "alert", canceled: "x" };
+
+function addTransfer(entry) {
+  const t = { id: ++transferSeq, ...entry };
+  transfers.unshift(t);
+  // 超出上限时丢弃最旧的已结束记录；进行中的保留
+  while (transfers.length > TRANSFER_LIMIT) {
+    const idx = transfers.findLastIndex((x) => x.state !== "up" && x.state !== "retry");
+    if (idx < 0) break;
+    transfers.splice(idx, 1);
+  }
+  renderTransfers();
+  return t;
+}
+
+function updateTransfer(t, changes) {
+  Object.assign(t, changes);
+  renderTransfers();
+}
+
+function renderTransfers() {
+  els.transferEmpty.classList.toggle("hidden", transfers.length > 0);
+  els.transferList.innerHTML = transfers
+    .map(
+      (t) => `<li class="transfer-item ${t.state}">
+        <div class="transfer-row">
+          <span class="transfer-icon">${iconSVG(TRANSFER_ICONS[t.state] || "up")}</span>
+          <span class="transfer-name" title="${escapeAttr(t.name)}">${escapeHTML(t.name)}</span>
+          <span class="transfer-state mono">${escapeHTML(t.label)}</span>
+        </div>
+        <div class="transfer-bar"><span style="width: ${Number(t.pct).toFixed(1)}%"></span></div>
+        <div class="transfer-detail mono">${escapeHTML(t.detail || "")}</div>
+      </li>`
+    )
+    .join("");
 }
 
 /**
@@ -1051,7 +1164,8 @@ async function uploadAndSend(file) {
 
   // 目标在上传开始时确定，上传过程中切换目标不影响本文件
   const to = currentRecipients();
-  const card = createUploadCard(file, sendTarget?.name);
+  const targetName = sendTarget?.name;
+  const card = createUploadCard(file, targetName);
   const controller = new AbortController();
   card.cancelBtn.addEventListener("click", () => controller.abort(), { once: true });
   activeUploads.add(controller);
@@ -1060,7 +1174,13 @@ async function uploadAndSend(file) {
   try {
     result = await uploadResumable(file, (bytes, note) => card.update(bytes, note), controller.signal);
   } catch (err) {
-    if (err.name !== "AbortError") alert(`「${file.name}」上传失败：${err.message}`);
+    const canceled = err.name === "AbortError";
+    updateTransfer(card.transfer, {
+      state: canceled ? "canceled" : "failed",
+      label: canceled ? "已取消" : "失败",
+      detail: canceled ? formatSize(file.size) : err.message,
+    });
+    if (!canceled) alert(`「${file.name}」上传失败：${err.message}`);
     return;
   } finally {
     activeUploads.delete(controller);
@@ -1077,8 +1197,16 @@ async function uploadAndSend(file) {
     },
   };
   if (!sendWS(payload, to) && !((await waitForOpen(30000)) && sendWS(payload, to))) {
+    updateTransfer(card.transfer, { state: "failed", label: "未发送", pct: 100, detail: "已上传，但连接中断未能发送" });
     alert(`「${file.name}」已上传，但聊天室连接中断，未能发送。请在恢复连接后重新发送该文件。`);
+    return;
   }
+  updateTransfer(card.transfer, {
+    state: "done",
+    label: "已发送",
+    pct: 100,
+    detail: `${formatSize(file.size)}${targetName ? ` · 私聊 ${targetName}` : ""}`,
+  });
 }
 
 // --- 连接信息 / 二维码 ---
@@ -1131,6 +1259,34 @@ async function showInfoDialog() {
   els.infoDialog.showModal();
 }
 
+/** 宽屏右栏：常驻的加入二维码与地址。显示的地址去掉口令 fragment，二维码里保留 */
+function renderSidePanel(info) {
+  const joinUrl = pickJoinURL(info);
+  const plainUrl = joinUrl.split("#")[0].replace(/\/$/, "");
+  els.sideQr.src = `/api/qrcode?url=${encodeURIComponent(joinUrl)}&t=${Date.now()}`;
+  els.sideUrl.textContent = plainUrl;
+  els.sideUrl.title = plainUrl;
+  els.sidePin.classList.toggle("hidden", !info.pinRequired);
+}
+
+/** 进入聊天室后加载房间信息：记录保留时长、右栏二维码、左栏地址 */
+async function loadRoomInfo() {
+  const info = await loadConnectionInfo().catch(() => null);
+  if (!info || !isInChat()) return;
+  roomInfo = info;
+  renderSidePanel(info);
+  renderChatMeta();
+}
+
+/** 左栏底部的本机信息 */
+function renderSelf() {
+  const platform = selfDevice?.platform || detectPlatform();
+  els.selfAvatar.outerHTML = avatarHTML(platform).replace('class="avatar', 'id="self-avatar" class="avatar');
+  els.selfAvatar = document.getElementById("self-avatar");
+  els.selfLabel.textContent = selfDevice?.name || chatName || "";
+  els.selfSub.textContent = `本机 · ${selfDevice?.ip || location.hostname}`;
+}
+
 // --- 页面流程 ---
 
 function enterChat(name) {
@@ -1140,10 +1296,13 @@ function enterChat(name) {
   document.documentElement.classList.add("in-chat");
   els.joinScreen.classList.add("hidden");
   els.chatScreen.classList.remove("hidden");
-  els.selfLabel.textContent = `当前身份：${name}`;
+  els.roomHost.textContent = location.host;
+  renderSelf();
+  renderTargetBar();
   setConnected(false);
   setDevicesPanel(false);
   initMobileViewportFix();
+  loadRoomInfo();
   connect(name);
 }
 
@@ -1163,6 +1322,8 @@ function leaveChat() {
   setSendTarget(null);
   devicesSignature = "";
   activeUploads.forEach((c) => c.abort());
+  transfers = [];
+  renderTransfers();
   document.body.classList.remove("in-chat");
   document.documentElement.classList.remove("in-chat");
   document.documentElement.style.removeProperty("--composer-offset");
@@ -1218,6 +1379,11 @@ els.joinBtn.addEventListener("click", async () => {
 els.pinInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") els.joinBtn.click();
 });
+els.deviceName.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (els.pinRow.classList.contains("hidden")) els.joinBtn.click();
+  else els.pinInput.focus();
+});
 
 els.deviceList.addEventListener("click", (e) => {
   const li = e.target.closest(".device-item.selectable");
@@ -1228,6 +1394,22 @@ els.deviceList.addEventListener("click", (e) => {
   if (!same) els.messageInput.focus();
 });
 els.targetClear.addEventListener("click", () => setSendTarget(null));
+els.backGroupBtn.addEventListener("click", () => setSendTarget(null));
+els.groupItem.addEventListener("click", () => {
+  setSendTarget(null);
+  setDevicesPanel(false);
+});
+els.closeDevicesBtn.addEventListener("click", () => setDevicesPanel(false));
+els.sideCopyUrl.addEventListener("click", async () => {
+  const ok = await copyToClipboard(els.sideUrl.textContent);
+  els.sideCopyUrl.title = ok ? "已复制" : "复制失败";
+  setTimeout(() => (els.sideCopyUrl.title = "复制地址"), 1600);
+});
+// 窗口在手机 / 桌面布局间切换：收起底部面板，更新输入框提示
+mobileLayout.addEventListener("change", () => {
+  setDevicesPanel(false);
+  if (isInChat()) renderTargetBar();
+});
 
 for (const btn of [els.showInfoBtn, els.infoPanelBtn]) {
   btn?.addEventListener("click", showInfoDialog);
@@ -1391,6 +1573,7 @@ els.deviceName.value = savedName || defaultDeviceName();
   const info = await loadConnectionInfo().catch(() => null);
   const needPIN = !!(info?.pinRequired && !info.authorized);
   showPinRow(needPIN);
+  if (info?.clientCount) els.joinOnline.textContent = `${info.clientCount} 台在线`;
 
   // 带 ?auto=1 时跳过进入页（方便手机扫码后直接进聊天）
   if (location.search.includes("auto=1") && savedName && !needPIN) {
