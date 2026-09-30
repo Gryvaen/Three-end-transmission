@@ -1501,10 +1501,72 @@ els.chatMain.addEventListener("drop", async (e) => {
   e.preventDefault();
   dragDepth = 0;
   els.dropOverlay.classList.add("hidden");
-  for (const file of [...e.dataTransfer.files]) {
-    await uploadAndSend(file);
+  // entry 必须在 drop 事件同步阶段取出，await 之后 dataTransfer 会被清空
+  const entries = [...(e.dataTransfer.items || [])]
+    .filter((item) => item.kind === "file")
+    .map((item) => item.webkitGetAsEntry?.());
+  if (!entries.length || !entries.every(Boolean)) {
+    // 不支持 FileSystem Entry API 的浏览器：文件夹会表现为 0B 文件，只能照常上传
+    for (const file of [...e.dataTransfer.files]) await uploadAndSend(file);
+    return;
+  }
+  for (const entry of entries) {
+    let file;
+    try {
+      file = entry.isDirectory ? await zipDirectory(entry) : await entryFile(entry);
+    } catch (err) {
+      alert(`「${entry.name}」读取失败：${err.message}`);
+      continue;
+    }
+    if (file) await uploadAndSend(file);
   }
 });
+
+function entryFile(entry) {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+// 递归列出目录下的所有文件，返回 [{ path, file }]，path 相对于 base
+async function listDirectory(dir, base) {
+  const reader = dir.createReader();
+  const children = [];
+  // readEntries 每次最多返回一批（Chrome 为 100 条），需循环读到空为止
+  for (;;) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  const out = [];
+  for (const child of children) {
+    const path = `${base}/${child.name}`;
+    if (child.isFile) out.push({ path, file: await entryFile(child) });
+    else if (child.isDirectory) out.push(...(await listDirectory(child, path)));
+  }
+  return out;
+}
+
+// 拖入文件夹时 dataTransfer.files 只给出一个 0B 的占位项，这里打包成一个 zip 整体发送
+async function zipDirectory(dir) {
+  const items = await listDirectory(dir, dir.name);
+  if (!items.length) {
+    alert(`文件夹「${dir.name}」是空的。`);
+    return null;
+  }
+  const zip = new JSZip();
+  for (const { path, file } of items) zip.file(path, file, { date: new Date(file.lastModified) });
+  const hint = els.dropOverlay.firstElementChild;
+  const saved = [...hint.childNodes];
+  hint.textContent = `正在打包「${dir.name}」…`;
+  els.dropOverlay.classList.remove("hidden");
+  try {
+    // 仅存储不压缩：局域网传输瓶颈不在带宽，压缩只会拖慢打包
+    const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+    return new File([blob], `${dir.name}.zip`, { type: "application/zip" });
+  } finally {
+    els.dropOverlay.classList.add("hidden");
+    hint.replaceChildren(...saved);
+  }
+}
 
 // --- 图片预览 ---
 
