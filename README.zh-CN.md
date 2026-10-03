@@ -47,6 +47,7 @@ docker compose -f docker-compose.host.yml up -d --build
 
 - **局域网**：在任意常开的机器上运行二进制文件或 Docker 镜像。
 - **公网服务器**：放在 Nginx + HTTPS 之后，设置 `LANROOM_PUBLIC_URL` 与 `LANROOM_PIN`。
+- **Tailscale**：用 `tailscale serve` 通过 HTTPS 提供给 tailnet 内的设备，配置与公网模式相同。
 
 详细步骤见[部署指南](docs/deployment.md)。
 
@@ -54,7 +55,7 @@ docker compose -f docker-compose.host.yml up -d --build
 
 | 文档 | 内容 |
 |------|------|
-| [部署](docs/deployment.md) | 二进制、Docker、公网服务器（Nginx + HTTPS） |
+| [部署](docs/deployment.md) | 二进制、Docker、公网服务器（Nginx + HTTPS）、Tailscale |
 | [配置](docs/configuration.md) | 命令行参数、环境变量、限制、安全说明 |
 | [API](docs/api.md) | WebSocket 协议、HTTP 接口、curl 示例 |
 | [常见问题](docs/troubleshooting.md) | 常见问题与解决办法 |

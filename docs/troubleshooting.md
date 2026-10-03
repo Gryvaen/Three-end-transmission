@@ -31,6 +31,24 @@
 
 查看日志：公网模式未设置 `LANROOM_PIN`，或 `LANROOM_PUBLIC_URL` 格式不对（必须以 `http://` / `https://` 开头且不带路径）。
 
+## Tailscale
+
+**`tailscale serve` 提示 `Serve is not enabled on your tailnet`**
+
+用管理员账号打开它打印的链接，开启 Serve 后重新运行。
+
+**打开 ts.net 地址提示证书错误或一直加载**
+
+管理后台没有开启 HTTPS Certificates；首次访问时证书需要几秒签发，稍后刷新。
+
+**设备列表里所有人的 IP 都是 127.0.0.1**
+
+没有设置 `LANROOM_TRUSTED_PROXIES=127.0.0.1,::1`。
+
+**手机打不开地址**
+
+确认手机上的 Tailscale 已连接，并且登录的是同一个 tailnet。
+
 ## 上传
 
 - 页面需显示「已连接」，否则上传后无法发出消息。

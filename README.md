@@ -47,6 +47,7 @@ docker compose -f docker-compose.host.yml up -d --build
 
 - **Local network**: run the binary or the Docker image on any always-on machine.
 - **Public server**: put LanRoom behind Nginx with HTTPS and set `LANROOM_PUBLIC_URL` and `LANROOM_PIN`.
+- **Tailscale**: serve it over HTTPS to your tailnet with `tailscale serve`, using the same public-mode settings.
 
 Step-by-step instructions are in the [deployment guide](docs/deployment.md).
 
@@ -56,7 +57,7 @@ The detailed guides are written in Chinese.
 
 | Guide | Contents |
 |-------|----------|
-| [Deployment](docs/deployment.md) | Binary, Docker, public server with Nginx + HTTPS |
+| [Deployment](docs/deployment.md) | Binary, Docker, public server with Nginx + HTTPS, Tailscale |
 | [Configuration](docs/configuration.md) | Flags, environment variables, limits, security notes |
 | [API](docs/api.md) | WebSocket protocol, HTTP endpoints, curl examples |
 | [Troubleshooting](docs/troubleshooting.md) | Common problems and fixes |

@@ -3,6 +3,7 @@
 - [直接运行](#直接运行)
 - [局域网：Docker](#局域网docker)
 - [公网服务器：Nginx + HTTPS](#公网服务器nginx--https)
+- [Tailscale：tailscale serve + HTTPS](#tailscaletailscale-serve--https)
 
 ## 直接运行
 
@@ -103,3 +104,59 @@ curl -s https://drop.example.com/api/info | jq '{joinUrl, pinRequired}'
 ```
 
 出现问题见 [常见问题](troubleshooting.md#公网部署)。
+
+## Tailscale：tailscale serve + HTTPS
+
+```
+tailnet 设备 ──HTTPS/WSS──▶ tailscaled :443 ──HTTP──▶ LanRoom 127.0.0.1:8788
+```
+
+设备不在同一个局域网、但都装了 Tailscale 时使用。`tailscale serve` 为 `<机器名>.<tailnet>.ts.net` 签发证书并反代到本机，作用相当于上一节的 Nginx。LanRoom 同样以公网模式运行，必须设置 `LANROOM_PIN`。只有 tailnet 内的设备能访问，每台设备都要安装 Tailscale 并登录同一个 tailnet。
+
+这个实例可以和局域网实例（`docker-compose.host.yml`，端口 8787）同时运行：两者是独立的房间，消息不互通。
+
+### 1. 前提
+
+在 Tailscale 管理后台的 DNS 页面开启 **MagicDNS** 和 **HTTPS Certificates**。tailnet 第一次使用 Serve 时，`tailscale serve` 会打印一个授权链接，用管理员账号打开并开启即可。
+
+查看本机域名（去掉末尾的 `.`）：
+
+```bash
+tailscale status --json | jq -r .Self.DNSName
+```
+
+### 2. 启动
+
+```bash
+cat >> .env <<'EOF'
+LANROOM_TS_URL=https://lanroom.tail1234.ts.net
+LANROOM_TS_PIN=<至少 8 位的口令>
+EOF
+docker compose -f docker-compose.tailscale.yml up -d --build
+tailscale serve --bg 8788
+```
+
+[`docker-compose.tailscale.yml`](../docker-compose.tailscale.yml) 使用独立的项目名、端口和数据卷；变量带 `TS_` 前缀，不会给局域网实例加上口令。
+
+不用 Docker 时：
+
+```bash
+LANROOM_PUBLIC_URL=https://lanroom.tail1234.ts.net \
+LANROOM_PIN=<口令> \
+LANROOM_LISTEN=127.0.0.1:8788 \
+LANROOM_TRUSTED_PROXIES=127.0.0.1,::1 \
+./lanroom
+```
+
+`tailscale serve status` 查看当前转发，`tailscale serve reset` 关闭。`tailscale serve` 不限制请求体大小，大文件不需要额外配置。
+
+### 3. 验证
+
+```bash
+curl -s https://lanroom.tail1234.ts.net/api/info | jq '{joinUrl, pinRequired}'
+# { "joinUrl": "https://lanroom.tail1234.ts.net", "pinRequired": true }
+```
+
+需要让 tailnet 外的人访问时可以改用 `tailscale funnel --bg 8788`。此时服务真正暴露在公网上，口令务必足够长。
+
+出现问题见 [常见问题](troubleshooting.md#tailscale)。
