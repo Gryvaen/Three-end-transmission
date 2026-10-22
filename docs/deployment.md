@@ -1,5 +1,7 @@
 # 部署
 
+从仓库根目录执行以下命令。新用户先看[首页](../README.md)与[使用手册](usage.md)。Linux 需要 Android 自动发现时优先直接运行或使用 host Compose；只运行一种局域网部署方式，避免争用 TCP `8787`。
+
 - [直接运行](#直接运行)
 - [局域网：Docker](#局域网docker)
 - [公网服务器：Nginx + HTTPS](#公网服务器nginx--https)
@@ -12,7 +14,9 @@ go build -o lanroom .
 ./lanroom -port 8787
 ```
 
-前端已嵌入二进制，复制这一个文件即可运行。上传目录默认在系统临时目录下，长期运行建议设置 `LANROOM_UPLOAD_DIR`。
+需要 Go 1.26.2 或更新版本。前端已嵌入二进制，同操作系统和架构下可复制二进制运行；终端按 Ctrl+C 停止。修改网页后需要重新构建或重启 `go run .`。
+
+上传目录默认位于系统临时目录。可设置 `LANROOM_UPLOAD_DIR` 指定工作目录，但启动时仍会清理旧文件；不要指向包含其他重要文件的目录。直接运行不会自动读取 `.env`，应使用 shell 环境变量传入配置。
 
 ## 局域网：Docker
 
@@ -31,13 +35,15 @@ docker compose -f docker-compose.host.yml up -d lanroom
 
 直接使用 Docker 构建时，对应参数为 `--build-arg GOPROXY=https://goproxy.cn,direct`。
 
-macOS / Windows 的 Docker Desktop 不支持 host 网络，使用端口映射，并手动指定宿主机 IP：
+macOS / Windows 使用 Docker Desktop 时，可用端口映射并指定宿主机实际局域网 IP（替换下方示例地址）：
 
 ```bash
 LANROOM_ADVERTISE_IP=192.168.1.10 docker compose up -d --build
 ```
 
-其他设置写在项目目录的 `.env` 中，例如：
+该 bridge 配置只发布 TCP HTTP 端口，适合网页或 App 手动连接，不保证 UDP 自动发现。Docker Desktop 4.34+ 可选择开启 host networking，但容器不能直接访问宿主机网卡，不能据此认定本项目的广播发现可用，详见 [Docker 官方说明](https://docs.docker.com/engine/network/drivers/host/)。自动发现应单独实测。
+
+Compose 读取项目目录 `.env` 做变量替换；只有 YAML 中显式传入 `environment` 的变量才会进入容器。例如现有局域网配置支持：
 
 ```dotenv
 LANROOM_PIN=2468
@@ -45,7 +51,16 @@ LANROOM_RETENTION=24h
 LANROOM_MAX_UPLOAD_MB=2048
 ```
 
-上传文件保存在 Docker 卷 `lanroom-uploads`。
+上传工作文件保存在 Docker 卷 `lanroom-uploads`，服务重启后仍会清理。`LANROOM_PORT` 只影响 bridge 的宿主机 TCP 映射；host 模式默认监听 8787，不使用该映射变量。
+
+所有 Compose 构建均可用下面的通用方式指定模块代理：
+
+```bash
+docker compose -f docker-compose.host.yml build --build-arg GOPROXY=https://goproxy.cn,direct
+docker compose -f docker-compose.host.yml up -d
+```
+
+使用其他部署文件时替换 `-f` 后的文件名。
 
 ## 公网服务器：Nginx + HTTPS
 
@@ -98,10 +113,10 @@ docker compose -f docker-compose.server.yml up -d --build
 
 ```bash
 LANROOM_PUBLIC_URL=https://drop.example.com \
-LANROOM_PIN=<口令> \
+LANROOM_PIN='请替换成至少8位的口令' \
 LANROOM_LISTEN=127.0.0.1:8787 \
 LANROOM_TRUSTED_PROXIES=127.0.0.1,::1 \
-LANROOM_UPLOAD_DIR=/var/lib/lanroom \
+LANROOM_UPLOAD_DIR=/var/lib/lanroom/uploads \
 ./lanroom
 ```
 
@@ -151,13 +166,13 @@ tailscale serve --bg 8788
 
 ```bash
 LANROOM_PUBLIC_URL=https://lanroom.tail1234.ts.net \
-LANROOM_PIN=<口令> \
+LANROOM_PIN='请替换成至少8位的口令' \
 LANROOM_LISTEN=127.0.0.1:8788 \
 LANROOM_TRUSTED_PROXIES=127.0.0.1,::1 \
 ./lanroom
 ```
 
-`tailscale serve status` 查看当前转发，`tailscale serve reset` 关闭。`tailscale serve` 不限制请求体大小，大文件不需要额外配置。
+使用 `tailscale serve status` 查看当前转发。若本实例占用默认 HTTPS 443，可使用 `tailscale serve --https=443 off` 关闭该入口，执行前确认不会影响同入口其他服务。`tailscale serve reset` 会清除全部 Serve 配置，不应作为日常停止单个房间的命令。命令语义见 [Tailscale 官方参考](https://tailscale.com/docs/reference/tailscale-cli/serve)。
 
 ### 3. 验证
 
@@ -166,6 +181,53 @@ curl -s https://lanroom.tail1234.ts.net/api/info | jq '{joinUrl, pinRequired}'
 # { "joinUrl": "https://lanroom.tail1234.ts.net", "pinRequired": true }
 ```
 
-需要让 tailnet 外的人访问时可以改用 `tailscale funnel --bg 8788`。此时服务真正暴露在公网上，口令务必足够长。
+Android App 不会通过局域网广播找到这个 HTTPS 实例，需要「手动连接」输入完整地址；App 重启后可能需要重新手动连接。这里的 8788 是回环 HTTP **TCP** 端口，与局域网发现 **UDP** 8788 不冲突。
 
 出现问题见 [常见问题](troubleshooting.md#tailscale)。
+
+## 服务身份持久化
+
+Go 使用 `LANROOM_DATA_DIR/service-id` 保存服务 UUID，默认目录为 `<用户配置目录>/lanroom`。现有 Compose 仅挂载上传卷，没有持久化身份目录，因此重建容器可能改变 UUID。App 找不到原 UUID 时请用「切换服务器」选择新实例。
+
+需要稳定身份时，在仓库根目录新建本地 `compose.identity.yml`（以下适用于 Linux host 配置）：
+
+```yaml
+services:
+  lanroom:
+    environment:
+      LANROOM_DATA_DIR: /app/state
+    volumes:
+      - lanroom-state:/app/state
+volumes:
+  lanroom-state:
+```
+
+首次启用或从未持久化的容器迁移时，可能生成新 UUID。此后所有启动、更新和停止命令都要使用同一组文件：
+
+```bash
+docker compose -f docker-compose.host.yml -f compose.identity.yml up -d --build
+```
+
+`/app` 由镜像入口脚本设置可写权限；身份目录应与 `/data/uploads` 分开，上传目录会被启动清理。不同独立实例应使用各自的身份卷。自定义发现端口或关闭发现也需在 override 的 `environment` 显式配置，仅写 `.env` 不会自动生效。
+
+## 更新、日志与停止
+
+以下以 Linux host 配置为例，其他方式替换文件名；配置身份 override 时每条 Compose 命令都加上它。
+
+```bash
+# 确认本地修改已妥善处理，再更新源码
+git pull --ff-only
+# 重建镜像并重建容器；单纯 restart 不会更新代码
+docker compose -f docker-compose.host.yml up -d --build
+# 查看状态和日志
+docker compose -f docker-compose.host.yml ps
+docker compose -f docker-compose.host.yml logs --tail 100
+# 检查 HTTP；成功不代表 UDP 发现成功
+curl --fail http://127.0.0.1:8787/api/info
+# 停止并移除容器，保留命名卷
+docker compose -f docker-compose.host.yml down
+```
+
+更新、重启和停止都会中断正在进行的传输。即便保留卷，下次启动仍清理旧上传文件；先通知使用者保存需要的文件。不要使用 `down -v` 保留数据，它会删除命名卷（包括已配置的身份卷）。
+
+直接运行时停止旧进程、重新 `go build -o lanroom .`，然后用原环境变量启动。Tailscale 实例停止容器不会自动删除 Serve 转发，需单独检查 Serve 状态。

@@ -1,6 +1,8 @@
 # API
 
-所有接口与页面同源。启用口令时，先调用 `/api/auth` 获取 cookie。
+所有接口与页面同源。启用口令时，先调用 `/api/auth` 获取 cookie；HTTP 上传、下载与 WebSocket 握手共用该 Cookie。Android 在系统安全存储按服务 UUID 保存 Cookie，UUID 不是认证凭据。服务端重启后会话失效。
+
+使用方法见[使用手册](usage.md)，默认值见[配置参考](configuration.md)。
 
 ## WebSocket `GET /ws`
 
@@ -46,6 +48,22 @@
 | `/api/files/{id}` | GET | 下载 |
 
 `GET /api/info` 新增 `serviceId`（持久化服务 UUID，身份初始化失败时省略）和 `discoveryVersion: 1`；原有字段保持兼容。
+
+## UDP 发现
+
+默认局域网模式在 UDP `8788` 接收 JSON 请求，公网模式不启动。客户端生成随机请求标识，在约三秒窗口内重试并按服务 UUID 去重：
+
+```json
+{"type":"lanroom.discover","version":1,"requestId":"0123456789abcdef"}
+```
+
+回复示例（`serviceId` 为实际持久化 UUID）：
+
+```json
+{"type":"lanroom.offer","version":1,"requestId":"0123456789abcdef","serviceId":"11111111-2222-4333-8444-555555555555","port":8787}
+```
+
+`requestId` 为 16–64 位字母、数字或连字符。客户端校验类型、版本和请求标识，用回复源 IPv4 与 `port` 构造 HTTP 地址，再请求 `/api/info` 核对 `serviceId`、`discoveryVersion`。响应不包含口令或会话；发现不承担认证。服务端只向真实广播接口同子网来源回复，详见[配置参考](configuration.md#局域网服务发现)。
 
 ## curl 示例
 

@@ -2,11 +2,25 @@
 
 Flutter 原生客户端，与仓库内 Go 服务端和网页互通。支持前台自动发现、口令登录、设备列表、群聊/私信、文件上传续传和下载保存。
 
-## 运行
+## 普通用户：安装与使用
+
+电脑先按[根目录首页](../README.md)运行服务，手机安装构建出的 APK。仓库没有承诺提供发布版 APK 下载链接。
+
+```sh
+# 从仓库根目录安装本地 debug APK，手机需启用 USB 调试并授权
+adb devices
+adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk
+```
+
+也可将 APK 复制到手机，按系统提示允许对应来源安装。debug 包仅供开发测试，不代表正式签名发布包；升级出现签名冲突时应先确认签名来源，卸载会丢失本地身份和任务。
+
+打开 App 等待自动发现，按提示选择服务、输入口令，然后与电脑网页互发文字及小文件。具体操作见[使用手册](../docs/usage.md)，发现失败见[排错指南](../docs/troubleshooting.md)。
+
+## 开发者：运行与构建
 
 需要 Flutter 3.47 / Dart 3.13 或兼容版本、JDK 17+、Android SDK 36。最低 Android 7（API 24）。
 
-先在电脑启动新版服务端：
+以下先从仓库根目录开始。可用 `flutter doctor -v` 检查环境、`flutter devices` 查看已授权 Android 设备。先在电脑启动新版服务端：
 
 ```sh
 go run .
@@ -30,7 +44,7 @@ flutter build apk --debug
 
 共享或只读 Flutter SDK 也可使用以上命令。项目会将 SDK 中的 Gradle 插件源码缓存到 `android/.gradle/flutter-tools/`，在那里编译插件，避免清理 `/opt/dev/flutter` 等 SDK 目录下其他用户的构建产物。缓存按源码内容区分，SDK 更新后自动生成新缓存；删除 `android/.gradle/` 后也会自动重建。不需要使用 `sudo flutter run` 或修改整个 SDK 的权限。
 
-首次打开自动发现；一个服务器自动连接，多个服务器手动选择。已选择的服务器按 UUID 记忆，IP 改变后重新发现。找不到原服务器时不会自动连接其他服务器，可通过右上角切换服务器。口令仅在需要时输入，Cookie 和设备密钥使用 Android Keystore 加密存储；服务端重启导致会话失效后需要重新输入口令。
+当前启动时会重新发起 UDP 发现，纯手动 HTTPS 地址场景下重启 App 后可能需重新输入地址。首次打开自动发现；一个服务器自动连接，多个服务器手动选择。已选择的服务器按 UUID 记忆，IP 改变后重新发现。找不到原服务器时不会自动连接其他服务器，可通过右上角切换服务器。口令仅在需要时输入，Cookie 和设备密钥使用 Android Keystore 加密存储；服务端重启导致会话失效后需要重新输入口令。
 
 ## 网络与 Mihomo
 
@@ -65,4 +79,4 @@ LANROOM_UPLOAD_DIR=/tmp/lanroom-test-uploads \
 LANROOM_PIN=mobile-test-2026 go run . -port 18787
 ```
 
-测试使用手机真实接口发现服务器，不依赖 `adb reverse`。集成测试中的额外客户端是协议测试对端，网页实际互通需另做浏览器验证。测试结果见 `TEST_RESULTS.md`。
+测试使用手机真实接口发现服务器，不依赖 `adb reverse`。集成测试中的额外客户端是协议测试对端，网页实际互通需另做浏览器验证。测试结果见 [TEST_RESULTS.md](TEST_RESULTS.md)。这些是历史验证记录，不代表当前电脑、手机或网络自动通过；真实地址变更、所有路由器及后台持续在线未获得普遍验证。

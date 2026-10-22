@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Chinese README is now the default entry point, with an English overview and a complete usage guide. Deployment, Android, configuration and troubleshooting guides now cover discovery, persistence limits and build issues.
+
 - `/api/upload` streams to disk instead of buffering the whole form.
 - Several tabs in the same browser can stay connected as one device, instead of disconnecting each other.
 - Static files are served with `Cache-Control: no-cache`, so phones load the new frontend after a deploy.

@@ -1,5 +1,7 @@
 # 配置
 
+配置在进程启动时读取。直接运行 Go 不自动加载 `.env`；Compose 仅将 YAML 中显式引用的 `.env` 值传入容器。变更后需要重启服务，传输和会话会中断。操作步骤见[部署指南](deployment.md)。
+
 ## 命令行参数
 
 | 参数 | 说明 | 默认 |
@@ -19,6 +21,9 @@
 | `LANROOM_PUBLIC_URL` | 公网地址，如 `https://drop.example.com`，不能带路径；设置后进入公网模式 | 空 |
 | `LANROOM_LISTEN` | 监听地址 | `:<port>` |
 | `LANROOM_TRUSTED_PROXIES` | 可信反向代理 IP / CIDR（逗号分隔），只有它们发来的 `X-Forwarded-*` 头会被采用 | 空 |
+| `LANROOM_DATA_DIR` | 服务 UUID 目录，应独立持久化 | `<用户配置目录>/lanroom` |
+| `LANROOM_DISCOVERY` | 精确设为 `false` 关闭 UDP 发现；公网模式不开启 | 局域网开启 |
+| `LANROOM_DISCOVERY_PORT` | 发现 UDP 端口，范围 `1..65535` | `8788` |
 | `LANROOM_PORT` | 仅 `docker-compose.yml`：宿主机端口 | `8787` |
 
 ## 限制
@@ -26,7 +31,7 @@
 | 项目 | 值 |
 |------|-----|
 | 上传分片 | 8 MiB |
-| WebSocket 单条消息 | 512 KB |
+| WebSocket 单条消息 | 512 KiB |
 | 私信接收者 | 最多 16 台设备 |
 | 口令错误 | 同一客户端 IP 每分钟 5 次 |
 | 登录会话 | 30 天 |
@@ -37,7 +42,7 @@
 
 - 口令是整个房间共享的，没有用户账号。启用后，除首页、`/api/info`、`/api/qrcode`、`/api/auth` 外的接口都需要登录。
 - 反向代理后面必须配置 `LANROOM_TRUSTED_PROXIES`，否则所有人共用代理 IP，一人输错口令会锁住所有人。
-- 设备 ID 由浏览器本地保存的密钥在服务端推导，看到别人的 ID 也无法冒充对方。
+- 设备 ID 由浏览器或 App 本地保存的密钥在服务端推导，看到别人的 ID 也无法冒充对方。
 - 局域网模式是明文 HTTP，公网部署务必使用 HTTPS。
 - 已登录设备展示的二维码包含口令，不要公开展示。
 
@@ -52,3 +57,5 @@
 发现请求 `{"type":"lanroom.discover","version":1,"requestId":"<16至64位字母数字或连字符>"}`；回复为 `lanroom.offer`，回显版本、请求标识，并包含 `serviceId` 与 HTTP `port`。客户端从回复来源获取服务地址，再通过 `/api/info` 校验 `serviceId` 和 `discoveryVersion`。身份标识不是认证凭据。
 
 仅向真实广播接口同子网内的来源回复，每秒最多处理 40 个报文。发现端口占用或接口控制信息不可用时不影响 HTTP 服务。HTTP 需监听局域网可达地址，防火墙需放行 HTTP 和 UDP 发现端口。Mihomo TUN 环境仍需确保局域网路由可达。
+
+App 自动发现固定使用 UDP `8788`，自定义端口后需手动连接。`LANROOM_ADVERTISE_IP` 只改变展示地址，不改变 HTTP 监听、路由或发现接口选择。现有 Compose 未传入发现及身份目录变量，需显式添加 override，见[身份持久化示例](deployment.md#服务身份持久化)。

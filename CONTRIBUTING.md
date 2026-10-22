@@ -17,7 +17,7 @@ Do not report security vulnerabilities in public issues; see [SECURITY.md](SECUR
 
 Requirements:
 
-- Go 1.26 or later (with Go 1.21+, `GOTOOLCHAIN=auto` downloads the right version)
+- Go 1.26.2 or later; automatic toolchain downloads require network access
 - Docker, optional, for testing the container setup
 
 ```bash
@@ -34,12 +34,16 @@ The frontend in `web/` is embedded into the binary with `go:embed`, so restart t
 main.go              Entry point: config, embedded frontend, HTTP server
 internal/config/     Environment variable parsing
 internal/hub/        WebSocket hub, message protocol, device identity
+internal/discovery/  UDP discovery and persistent service identity
 internal/netutil/    LAN IP detection
 internal/server/     HTTP routes, resumable uploads, PIN auth, proxy handling
-web/                 Frontend
+mobile/              Flutter Android app, tests and build instructions
+web/                 Embedded browser frontend
 deploy/              Reverse proxy examples
 docs/                User documentation (Chinese)
 ```
+
+For Android development, follow the [mobile guide](mobile/README.md). From `mobile/`, run `flutter pub get`, `flutter analyze`, `flutter test` and `flutter build apk --debug`. Device integration tests require the separate LAN test service described there. Do not substitute `adb reverse` for LAN discovery validation.
 
 ## Before you submit
 
