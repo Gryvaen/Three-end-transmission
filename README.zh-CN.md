@@ -43,6 +43,10 @@ Linux 上使用 Docker：
 docker compose -f docker-compose.host.yml up -d --build
 ```
 
+## Android 客户端
+
+可选的 Flutter Android 客户端位于 [`mobile/`](mobile/README.md)，支持局域网自动发现、文字与文件互传、上传续传。电脑需运行新版 Go 服务端，手机打开 App 后自动寻找服务，不需要固定服务器 IP。网页仍可直接使用。
+
 ## 部署
 
 - **局域网**：在任意常开的机器上运行二进制文件或 Docker 镜像。

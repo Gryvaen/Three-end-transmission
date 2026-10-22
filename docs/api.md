@@ -45,6 +45,8 @@
 | `/api/upload` | POST | 单次上传，`multipart/form-data` 字段 `file` |
 | `/api/files/{id}` | GET | 下载 |
 
+`GET /api/info` 新增 `serviceId`（持久化服务 UUID，身份初始化失败时省略）和 `discoveryVersion: 1`；原有字段保持兼容。
+
 ## curl 示例
 
 ```bash

@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"three-end-transmission/internal/config"
+	"three-end-transmission/internal/discovery"
 	"three-end-transmission/internal/server"
 )
 
@@ -70,7 +72,21 @@ func main() {
 
 	uploadDir := os.Getenv("LANROOM_UPLOAD_DIR")
 
+	dataDir := os.Getenv("LANROOM_DATA_DIR")
+	if dataDir == "" {
+		base, e := os.UserConfigDir()
+		if e != nil {
+			base = "."
+		}
+		dataDir = filepath.Join(base, "lanroom")
+	}
+	serviceID, identityErr := discovery.Identity(dataDir)
+	if identityErr != nil {
+		slog.Warn("service identity unavailable", "err", identityErr)
+	}
+
 	srv := server.New(server.Config{
+		ServiceID:      serviceID,
 		Port:           *port,
 		StaticFS:       http.FS(static),
 		UploadDir:      uploadDir,
@@ -79,6 +95,29 @@ func main() {
 		TrustedProxies: trusted,
 	})
 	srv.StartFileCleanup()
+
+	if publicURL == "" && serviceID != "" && os.Getenv("LANROOM_DISCOVERY") != "false" {
+		discoveryPort := discovery.DefaultPort
+		if value := os.Getenv("LANROOM_DISCOVERY_PORT"); value != "" {
+			n, e := strconv.Atoi(value)
+			if e != nil || n < 1 || n > 65535 {
+				discoveryPort = -1
+			} else {
+				discoveryPort = n
+			}
+		}
+		if discoveryPort < 0 {
+			slog.Warn("invalid LANROOM_DISCOVERY_PORT; discovery disabled")
+		} else {
+			d, e := discovery.Start(net.JoinHostPort("0.0.0.0", strconv.Itoa(discoveryPort)), *port, serviceID)
+			if e != nil {
+				slog.Warn("UDP discovery unavailable", "err", e)
+			} else {
+				defer d.Close()
+				slog.Info("UDP discovery started", "addr", d.Addr(), "serviceId", serviceID)
+			}
+		}
+	}
 
 	httpServer := &http.Server{
 		Addr:    listen,

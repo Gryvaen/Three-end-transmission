@@ -17,3 +17,6 @@ uploads/
 
 # 本地部署配置（可能含房间口令）
 .env
+
+# 浏览器验证临时输出
+/.playwright-cli/

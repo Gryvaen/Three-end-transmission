@@ -40,3 +40,15 @@
 - 设备 ID 由浏览器本地保存的密钥在服务端推导，看到别人的 ID 也无法冒充对方。
 - 局域网模式是明文 HTTP，公网部署务必使用 HTTPS。
 - 已登录设备展示的二维码包含口令，不要公开展示。
+
+## 局域网服务发现
+
+新版 Android 客户端通过 IPv4 UDP 自动发现服务，网页访问方式保持不变。
+
+- `LANROOM_DISCOVERY=false`：关闭发现；公网模式默认不启动发现。
+- `LANROOM_DISCOVERY_PORT`：UDP 监听端口，默认 `8788`，范围 `1..65535`；无效配置仅关闭发现并记录警告。
+- `LANROOM_DATA_DIR`：服务身份数据目录，默认 `<用户配置目录>/lanroom`。`service-id` 保存持久化 UUID，请勿与上传临时文件一起清理；Docker 部署应将此目录挂载持久卷。
+
+发现请求 `{"type":"lanroom.discover","version":1,"requestId":"<16至64位字母数字或连字符>"}`；回复为 `lanroom.offer`，回显版本、请求标识，并包含 `serviceId` 与 HTTP `port`。客户端从回复来源获取服务地址，再通过 `/api/info` 校验 `serviceId` 和 `discoveryVersion`。身份标识不是认证凭据。
+
+仅向真实广播接口同子网内的来源回复，每秒最多处理 40 个报文。发现端口占用或接口控制信息不可用时不影响 HTTP 服务。HTTP 需监听局域网可达地址，防火墙需放行 HTTP 和 UDP 发现端口。Mihomo TUN 环境仍需确保局域网路由可达。

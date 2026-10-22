@@ -23,6 +23,7 @@ import (
 )
 
 type Config struct {
+	ServiceID      string
 	Port           int
 	StaticFS       http.FileSystem
 	UploadDir      string
@@ -56,16 +57,18 @@ type fileRecord struct {
 }
 
 type infoResponse struct {
-	JoinURL      string   `json:"joinUrl"`
-	PublicURL    string   `json:"publicUrl,omitempty"`
-	PINRequired  bool     `json:"pinRequired"`
-	Authorized   bool     `json:"authorized"`
-	RetentionSec int64    `json:"retentionSec"`
-	Port         int      `json:"port"`
-	LocalIPs     []string `json:"localIps"`
-	URLs         []string `json:"urls"`
-	ClientCount  int      `json:"clientCount"`
-	MaxUploadMB  int      `json:"maxUploadMb"`
+	ServiceID        string   `json:"serviceId,omitempty"`
+	DiscoveryVersion int      `json:"discoveryVersion"`
+	JoinURL          string   `json:"joinUrl"`
+	PublicURL        string   `json:"publicUrl,omitempty"`
+	PINRequired      bool     `json:"pinRequired"`
+	Authorized       bool     `json:"authorized"`
+	RetentionSec     int64    `json:"retentionSec"`
+	Port             int      `json:"port"`
+	LocalIPs         []string `json:"localIps"`
+	URLs             []string `json:"urls"`
+	ClientCount      int      `json:"clientCount"`
+	MaxUploadMB      int      `json:"maxUploadMb"`
 }
 
 func New(cfg Config) *Server {
@@ -206,16 +209,18 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := infoResponse{
-		Port:         s.cfg.Port,
-		LocalIPs:     ips,
-		URLs:         urls,
-		JoinURL:      join,
-		PublicURL:    s.cfg.PublicURL,
-		PINRequired:  s.auth.enabled(),
-		Authorized:   authorized,
-		RetentionSec: int64(s.cfg.Retention.Seconds()),
-		ClientCount:  s.hub.ClientCount(),
-		MaxUploadMB:  int(s.cfg.MaxUploadBytes >> 20),
+		ServiceID:        s.cfg.ServiceID,
+		DiscoveryVersion: 1,
+		Port:             s.cfg.Port,
+		LocalIPs:         ips,
+		URLs:             urls,
+		JoinURL:          join,
+		PublicURL:        s.cfg.PublicURL,
+		PINRequired:      s.auth.enabled(),
+		Authorized:       authorized,
+		RetentionSec:     int64(s.cfg.Retention.Seconds()),
+		ClientCount:      s.hub.ClientCount(),
+		MaxUploadMB:      int(s.cfg.MaxUploadBytes >> 20),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
