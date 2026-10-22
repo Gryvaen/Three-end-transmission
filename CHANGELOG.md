@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `LANROOM_LISTEN` and the `-addr` flag set the listen address, for example `127.0.0.1:8787` behind a reverse proxy.
 - `LANROOM_TRUSTED_PROXIES`: `X-Forwarded-*` headers are honoured only from the listed proxies.
 - Nginx example config (`deploy/nginx/lanroom.conf`) and `docker-compose.server.yml` for public deployments.
+- Deployment guide for Tailscale (`tailscale serve` + HTTPS), reusing public mode, and `docker-compose.tailscale.yml`, which runs alongside the LAN instance.
 - Resumable chunked uploads (`/api/uploads`, 8 MiB chunks), with progress, speed, cancel and automatic retry in the UI.
 - Direct messages to one or more devices; history is filtered per device.
 - Optional room PIN (`LANROOM_PIN`) with cookie sessions. The QR code of a logged-in device signs new devices in automatically.

@@ -1,0 +1,37 @@
+# LanRoom Tailscale 实例（配合 tailscale serve，见 docs/deployment.md）
+# 可与 docker-compose.host.yml 的局域网实例同时运行：独立项目名、端口 8788、独立数据卷。
+# 在 .env 中设置（用 TS_ 前缀，避免口令影响局域网实例）：
+#   LANROOM_TS_URL=https://<机器名>.<tailnet>.ts.net
+#   LANROOM_TS_PIN=<至少 8 位的口令>
+# 启动：
+#   docker compose -f docker-compose.tailscale.yml up -d --build
+#   tailscale serve --bg 8788
+
+name: lanroom-tailscale
+
+services:
+  lanroom:
+    build: .
+    image: lanroom:latest
+    container_name: lanroom-tailscale
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LANROOM_UPLOAD_DIR: /data/uploads
+      LANROOM_LISTEN: 127.0.0.1:8788
+      LANROOM_TRUSTED_PROXIES: 127.0.0.1,::1
+      LANROOM_PUBLIC_URL: ${LANROOM_TS_URL:?set LANROOM_TS_URL in .env}
+      LANROOM_PIN: ${LANROOM_TS_PIN:?set LANROOM_TS_PIN in .env}
+      LANROOM_MAX_UPLOAD_MB: ${LANROOM_MAX_UPLOAD_MB:-}
+      LANROOM_RETENTION: ${LANROOM_RETENTION:-}
+    volumes:
+      - uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8788/api/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  uploads:
