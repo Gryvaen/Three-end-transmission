@@ -8,3 +8,5 @@ lanroom.exe
 *.exe
 uploads/
 .env
+mobile/
+.playwright-cli/

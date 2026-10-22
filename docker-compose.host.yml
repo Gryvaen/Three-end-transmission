@@ -5,7 +5,10 @@
 
 services:
   lanroom:
-    build: .
+    build:
+      context: .
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     image: lanroom:latest
     container_name: lanroom
     restart: unless-stopped

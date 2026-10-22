@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26.2-alpine AS builder
 
-ENV GOTOOLCHAIN=auto
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOTOOLCHAIN=local \
+    GOPROXY=${GOPROXY}
 
 WORKDIR /src
 

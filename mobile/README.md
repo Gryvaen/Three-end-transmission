@@ -28,6 +28,8 @@ flutter build apk --debug
 
 产物：`build/app/outputs/flutter-apk/app-debug.apk`。这是开发测试包，发布前需要配置正式签名。
 
+共享或只读 Flutter SDK 也可使用以上命令。项目会将 SDK 中的 Gradle 插件源码缓存到 `android/.gradle/flutter-tools/`，在那里编译插件，避免清理 `/opt/dev/flutter` 等 SDK 目录下其他用户的构建产物。缓存按源码内容区分，SDK 更新后自动生成新缓存；删除 `android/.gradle/` 后也会自动重建。不需要使用 `sudo flutter run` 或修改整个 SDK 的权限。
+
 首次打开自动发现；一个服务器自动连接，多个服务器手动选择。已选择的服务器按 UUID 记忆，IP 改变后重新发现。找不到原服务器时不会自动连接其他服务器，可通过右上角切换服务器。口令仅在需要时输入，Cookie 和设备密钥使用 Android Keystore 加密存储；服务端重启导致会话失效后需要重新输入口令。
 
 ## 网络与 Mihomo

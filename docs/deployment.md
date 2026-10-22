@@ -21,6 +21,15 @@ Linux 使用 host 网络，自动识别局域网 IP：
 docker compose -f docker-compose.host.yml up -d --build
 ```
 
+Docker 构建使用 Go 1.26.2，直接使用镜像内的工具链，不额外下载 Go 编译器。若当前网络无法连接默认 Go 模块代理，可指定依赖代理后构建：
+
+```bash
+GOPROXY=https://goproxy.cn,direct docker compose -f docker-compose.host.yml build lanroom
+docker compose -f docker-compose.host.yml up -d lanroom
+```
+
+直接使用 Docker 构建时，对应参数为 `--build-arg GOPROXY=https://goproxy.cn,direct`。
+
 macOS / Windows 的 Docker Desktop 不支持 host 网络，使用端口映射，并手动指定宿主机 IP：
 
 ```bash

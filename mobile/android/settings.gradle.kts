@@ -16,7 +16,38 @@ pluginManagement {
             flutterSdkPath
         }
 
-    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+    // Flutter's included build normally writes into the SDK. Shared/read-only
+    // SDKs can contain another user's outputs, so build a local source snapshot.
+    // Key it by contents so SDK upgrades and removed files cannot leave stale code.
+    val pluginSource = file("$flutterSdkPath/packages/flutter_tools/gradle")
+    val generatedDirectories = setOf("build", ".gradle", ".kotlin", "bin")
+    val sourceFiles = pluginSource.walkTopDown()
+        .onEnter { it == pluginSource || it.parentFile != pluginSource || it.name !in generatedDirectories }
+        .filter { it.isFile }
+        .sortedBy { it.relativeTo(pluginSource).invariantSeparatorsPath }
+        .toList()
+    check(sourceFiles.isNotEmpty()) { "Flutter Gradle plugin sources not found: $pluginSource" }
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    digest.update(pluginSource.canonicalPath.toByteArray(Charsets.UTF_8))
+    sourceFiles.forEach { source ->
+        digest.update(source.relativeTo(pluginSource).invariantSeparatorsPath.toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(source.readBytes())
+    }
+    val snapshotId = digest.digest().joinToString("") { "%02x".format(it) }
+    val pluginSnapshot = settingsDir.resolve(".gradle/flutter-tools/$snapshotId")
+    val ready = pluginSnapshot.resolve(".lanroom-ready")
+    if (!ready.isFile) {
+        sourceFiles.forEach { source ->
+            val destination = pluginSnapshot.resolve(source.relativeTo(pluginSource).path)
+            destination.parentFile.mkdirs()
+            source.copyTo(destination, overwrite = true)
+        }
+        ready.writeText(snapshotId)
+    }
+    // PluginManagementSpec takes a String; passing a File calls Settings'
+    // ordinary includeBuild overload, which is too late for plugin resolution.
+    includeBuild(pluginSnapshot.absolutePath) { name = "flutter-tools" }
 
     repositories {
         google()
