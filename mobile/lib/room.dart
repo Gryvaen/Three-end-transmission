@@ -49,7 +49,8 @@ class Room extends ChangeNotifier {
       _directory = await bridge.directory;
       key = await bridge.read('deviceKey') ?? randomID(32);
       await bridge.write('deviceKey', key);
-      nickname = await bridge.read('nickname') ?? nickname;
+      nickname =
+          await bridge.read('nickname') ?? await _deviceName() ?? nickname;
       preferred = await bridge.read('preferred');
       final pending = await bridge.read('upload');
       if (pending != null && pending.isNotEmpty) {
@@ -82,6 +83,16 @@ class Room extends ChangeNotifier {
       await search();
     } catch (e) {
       fail('初始化失败：$e');
+    }
+  }
+
+  // A missing system name must not block startup; keep the built-in default.
+  Future<String?> _deviceName() async {
+    try {
+      final name = (await bridge.deviceName)?.trim();
+      return name == null || name.isEmpty ? null : name;
+    } catch (_) {
+      return null;
     }
   }
 

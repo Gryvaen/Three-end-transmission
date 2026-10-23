@@ -7,6 +7,7 @@ class AndroidBridge {
       channel.invokeMethod<String>('read', {'key': key});
   Future<void> write(String key, String value) =>
       channel.invokeMethod('write', {'key': key, 'value': value});
+  Future<String?> get deviceName => channel.invokeMethod<String>('deviceName');
   Future<String> get directory async =>
       (await channel.invokeMethod<String>('directory'))!;
   Future<List<Map<String, dynamic>>> get interfaces async =>

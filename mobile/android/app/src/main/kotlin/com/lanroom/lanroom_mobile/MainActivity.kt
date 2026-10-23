@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -47,6 +48,7 @@ class MainActivity: FlutterActivity() {
             try {
                 when(call.method) {
                     "directory" -> result.success(filesDir.absolutePath)
+                    "deviceName" -> result.success(deviceName())
                     "read" -> result.success(readSecret(call.argument<String>("key")!!))
                     "write" -> { writeSecret(call.argument<String>("key")!!, call.argument<String>("value")!!); result.success(null) }
                     "interfaces" -> {
@@ -128,6 +130,16 @@ class MainActivity: FlutterActivity() {
         })
     }
 
+    // The name set under Settings > About phone; falls back to the model on ROMs without it.
+    // Hidden keys such as bluetooth_name throw SecurityException for targetSdk 31+.
+    private fun deviceName(): String {
+        val name = if (Build.VERSION.SDK_INT >= 25) {
+            try { Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME) } catch (e: Exception) { null }
+        } else null
+        if (!name.isNullOrBlank()) return name.trim()
+        val model = Build.MODEL.trim()
+        return if (model.startsWith(Build.MANUFACTURER, ignoreCase = true)) model else "${Build.MANUFACTURER} $model"
+    }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey("lanroom-secrets", null) as? SecretKey)?.let { return it }
