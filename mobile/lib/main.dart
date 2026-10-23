@@ -165,7 +165,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 builder: (context) => AlertDialog(
                   title: const Text('连接排查'),
                   content: const Text(
-                    '手机和电脑需处于同一局域网。\n\n电脑需运行新版 Go 服务端，并允许 UDP 8788 和 HTTP 服务端口。\n\nMihomo TUN 可能影响路由，请检查局域网绕过配置。应用不会修改代理或防火墙。\n\n首版支持前台互传，回到应用后会自动重连。',
+                    '手机和电脑需处于同一局域网。\n\n电脑需运行新版 Go 服务端，并允许 UDP 8788 和 HTTP 服务端口。\n\nMihomo TUN 可能影响路由，请检查局域网绕过配置。应用不会修改代理或防火墙。\n\n连接后通知栏会显示“LanRoom 已连接”，切到后台、锁屏或选择文件时保持在线；划掉应用即断开。断线时会直接重连原服务器，地址变化时才重新搜索。',
                   ),
                   actions: [
                     TextButton(

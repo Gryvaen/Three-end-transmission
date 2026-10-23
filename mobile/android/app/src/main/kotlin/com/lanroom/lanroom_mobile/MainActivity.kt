@@ -10,6 +10,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -37,6 +38,8 @@ class MainActivity: FlutterActivity() {
     private var lock: WifiManager.MulticastLock? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var permissionResult: MethodChannel.Result? = null
+    private var serviceLabel: String? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -85,6 +88,27 @@ class MainActivity: FlutterActivity() {
                             permissionResult = result
                             requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 103)
                         } else result.success(true)
+                    }
+                    "service" -> {
+                        if (call.argument<Boolean>("on") == true) {
+                            serviceLabel = call.argument<String>("label")
+                            // Without the permission the service still runs; only the notification is hidden.
+                            if (Build.VERSION.SDK_INT >= 33 &&
+                                checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 104)
+                            } else startConnectionService()
+                        } else stopService(Intent(this, ConnectionService::class.java))
+                        result.success(null)
+                    }
+                    "wakelock" -> {
+                        if (call.argument<Boolean>("on") == true) {
+                            if (wakeLock == null) {
+                                // Timeout guards against a lock leaked by a stuck transfer.
+                                wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lanroom:transfer").apply { acquire(30 * 60 * 1000L) }
+                            }
+                        } else releaseWakeLock()
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }
@@ -154,6 +178,19 @@ class MainActivity: FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if(requestCode == 103) { permissionResult?.success(grantResults.isNotEmpty() && grantResults[0] == 0); permissionResult = null }
+        if(requestCode == 104) startConnectionService()
     }
-    override fun onDestroy() { lock?.let { if(it.isHeld) it.release() }; worker.shutdown(); super.onDestroy() }
+    private fun startConnectionService() {
+        val intent = Intent(this, ConnectionService::class.java).putExtra("label", serviceLabel)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        } catch (e: Exception) { /* Background start is refused; the app reconnects on resume instead. */ }
+    }
+    private fun releaseWakeLock() { wakeLock?.let { if(it.isHeld) it.release() }; wakeLock = null }
+    // The connection lives in this activity's Flutter engine; nothing survives it.
+    override fun onDestroy() {
+        lock?.let { if(it.isHeld) it.release() }; releaseWakeLock()
+        stopService(Intent(this, ConnectionService::class.java))
+        worker.shutdown(); super.onDestroy()
+    }
 }

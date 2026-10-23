@@ -21,5 +21,9 @@ class AndroidBridge {
   Future<bool> save(String path, String name) async =>
       await channel.invokeMethod<bool>('save', {'path': path, 'name': name}) ??
       false;
+  Future<void> keepAlive(bool on, [String? label]) =>
+      channel.invokeMethod('service', {'on': on, 'label': label});
+  Future<void> transferring(bool on) =>
+      channel.invokeMethod('wakelock', {'on': on});
   Stream<dynamic> get network => events.receiveBroadcastStream();
 }

@@ -30,8 +30,10 @@ class Room extends ChangeNotifier {
   bool downloading = false;
   bool picking = false;
   double downloadProgress = 0;
-  bool _disposed = false, _foreground = true;
-  int _generation = 0, _transferGeneration = 0;
+  bool _disposed = false, _foreground = true, _service = false;
+  bool _awake = false;
+  int _generation = 0, _transferGeneration = 0, _attempts = 0;
+  String? _serviceLabel;
   StreamSubscription<dynamic>? _network, _socket;
   Timer? _retry, _debounce;
   String _directory = '';
@@ -67,8 +69,8 @@ class Room extends ChangeNotifier {
         (_) {
           _debounce?.cancel();
           _debounce = Timer(const Duration(seconds: 2), () {
-            if (_foreground && !busy) {
-              reconnect();
+            if (_foreground || _service) {
+              reconnect(probe: true);
             }
           });
         },
@@ -90,17 +92,34 @@ class Room extends ChangeNotifier {
 
   void foreground(bool active) {
     _foreground = active;
-    if (active && !busy) {
+    if (active) {
       reconnect();
     }
   }
 
+  // Native calls are best effort: a missing service or wake lock must not
+  // break the connection itself.
+  void _native(Future<void> Function() call) {
+    unawaited(call().catchError((Object _) {}));
+  }
+
+  void _syncWake() {
+    final awake = _service && (uploading || downloading);
+    if (awake != _awake) {
+      _awake = awake;
+      _native(() => bridge.transferring(awake));
+    }
+  }
+
+  // Backoff 2s, 4s, 8s, 16s, then 30s; reset once a socket opens.
   void _schedule() {
     _retry?.cancel();
     if (!_disposed) {
-      _retry = Timer(const Duration(seconds: 5), () {
-        if (_foreground && !busy && !needsPin && !connected) {
-          search();
+      final delay = Duration(seconds: min(30, 2 << min(_attempts, 4)));
+      _attempts++;
+      _retry = Timer(delay, () {
+        if ((_foreground || _service) && !busy && !needsPin && !connected) {
+          _recover();
         } else if (!_disposed && !connected) {
           _schedule();
         }
@@ -108,23 +127,53 @@ class Room extends ChangeNotifier {
     }
   }
 
-  Future<void> reconnect() async {
-    if (busy) {
+  // Reattach to the known address first; UDP discovery is only a fallback for
+  // a server whose address changed, and only runs in the foreground.
+  Future<void> _recover() async {
+    final server = selected;
+    if (busy || _disposed) {
       return;
     }
-    if (selected != null && connected) {
+    if (server != null && await attach(server, silent: true)) {
+      return;
+    }
+    if (_disposed || busy || needsPin) {
+      return;
+    }
+    if (_foreground && (server == null || !server.id.startsWith('manual:'))) {
+      await search();
+    } else {
+      _schedule();
+    }
+  }
+
+  // An open WebSocket is trusted as-is; its ping detects dead peers. Only
+  // network changes probe the server, with a fresh client so a stale pooled
+  // HTTP connection cannot tear down a working socket.
+  Future<void> reconnect({bool probe = false}) async {
+    if (busy || needsPin || _disposed) {
+      return;
+    }
+    if (connected && client?.socket?.readyState == WebSocket.open) {
+      if (!probe) {
+        return;
+      }
+      final check = LanClient(selected!.uri);
       try {
-        final info = await client!.info();
-        if (info['authorized'] == true) {
-          return;
-        }
-        await attach(selected!);
+        await check.info();
         return;
       } catch (_) {
-        /* Rediscover on address change. */
+        /* Address likely changed; reattach below. */
+      } finally {
+        check.close();
+      }
+      if (busy || _disposed) {
+        return;
       }
     }
-    await search();
+    _retry?.cancel();
+    _attempts = 0;
+    await _recover();
   }
 
   Future<void> search({bool chooseAnother = false}) async {
@@ -136,9 +185,13 @@ class Room extends ChangeNotifier {
     status = '正在查找局域网服务';
     changed();
     final token = ++_generation;
+    _retry?.cancel();
     connected = false;
     needsPin = false;
     devices = [];
+    if (chooseAnother) {
+      selected = null;
+    }
     await _socket?.cancel();
     client?.close();
     client = null;
@@ -186,7 +239,10 @@ class Room extends ChangeNotifier {
       error = servers.isEmpty
           ? '请确认电脑服务已启动、处于同一网络，且防火墙允许 UDP 8788 / TCP 8787。Mihomo 需放行局域网路由。'
           : null;
-      _schedule();
+      // Keep retrying only when there is nothing to choose from.
+      if (servers.isEmpty || (preferred != null && !chooseAnother)) {
+        _schedule();
+      }
     } catch (e) {
       status = '自动发现失败';
       error = e.toString();
@@ -232,18 +288,25 @@ class Room extends ChangeNotifier {
     }
   }
 
-  Future<void> attach(FoundServer server) async {
+  // Returns false when the server could not be reached. A silent attach is an
+  // automatic reconnect: the caller decides how to retry.
+  Future<bool> attach(FoundServer server, {bool silent = false}) async {
     _retry?.cancel();
     final token = ++_generation;
     busy = true;
     connected = false;
     needsPin = false;
-    error = null;
-    status = '正在连接';
+    if (!silent) {
+      error = null;
+    }
+    status = silent ? '正在重新连接' : '正在连接';
+    // History replaces messages on join; keep them visible meanwhile.
+    if (selected?.id != server.id) {
+      messages = [];
+      recipients = [];
+    }
     selected = server;
     devices = [];
-    messages = [];
-    recipients = [];
     changed();
     await _socket?.cancel();
     client?.close();
@@ -259,19 +322,26 @@ class Room extends ChangeNotifier {
       next.cookie = await bridge.read('cookie:${server.id}');
       final info = await next.info();
       if (token != _generation || _disposed) {
-        return;
+        return true;
       }
       if (info['pinRequired'] == true && info['authorized'] != true) {
         next.cookie = null;
         needsPin = true;
         status = '请输入房间口令';
-        return;
+        return true;
       }
       await _open(token);
+      return true;
     } catch (e) {
+      if (token != _generation || _disposed) {
+        return true;
+      }
       status = '连接失败';
       error = e.toString();
-      _schedule();
+      if (!silent) {
+        _schedule();
+      }
+      return false;
     } finally {
       if (token == _generation) {
         busy = false;
@@ -318,6 +388,15 @@ class Room extends ChangeNotifier {
     await bridge.write('lastAddress', selected!.uri.toString());
     connected = true;
     status = '已连接';
+    error = null;
+    _attempts = 0;
+    // Starting a foreground service is only allowed from the foreground.
+    final label = selected!.uri.authority;
+    if (_foreground && label != _serviceLabel) {
+      _service = true;
+      _serviceLabel = label;
+      _native(() => bridge.keepAlive(true, label));
+    }
     _socket = ws.listen(
       (raw) {
         if (token != _generation) {
@@ -364,9 +443,14 @@ class Room extends ChangeNotifier {
     }
     connected = false;
     devices = [];
-    status = '连接中断，正在等待重连';
+    status = '连接中断，正在重连';
     changed();
-    _schedule();
+    _attempts = 0;
+    if ((_foreground || _service) && !busy) {
+      _recover();
+    } else {
+      _schedule();
+    }
   }
 
   Future<void> rename(String value) async {
@@ -439,6 +523,7 @@ class Room extends ChangeNotifier {
       return;
     }
     uploading = true;
+    _syncWake();
     progress = 0;
     transferStatus = '准备上传';
     changed();
@@ -541,6 +626,7 @@ class Room extends ChangeNotifier {
     } finally {
       await source?.close();
       uploading = false;
+      _syncWake();
       changed();
     }
   }
@@ -608,6 +694,7 @@ class Room extends ChangeNotifier {
       return null;
     }
     downloading = true;
+    _syncWake();
     downloadProgress = 0;
     transferStatus = '正在下载';
     changed();
@@ -655,6 +742,7 @@ class Room extends ChangeNotifier {
       return null;
     } finally {
       downloading = false;
+      _syncWake();
       changed();
     }
   }
@@ -669,6 +757,9 @@ class Room extends ChangeNotifier {
     _network?.cancel();
     _socket?.cancel();
     client?.close();
+    if (_service) {
+      _native(() => bridge.keepAlive(false));
+    }
     super.dispose();
   }
 }
