@@ -75,6 +75,9 @@ void main() {
     bridge = FakeBridge();
     room = Room(bridge: bridge);
     await room.attach(FoundServer(serviceID, server.uri));
+    // The client can finish the handshake before the server-side upgrade
+    // future completes and records the socket.
+    await until(() => server.sockets.length == 1);
   });
   tearDown(() async {
     room.dispose();

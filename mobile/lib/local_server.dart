@@ -128,7 +128,11 @@ class LocalServer extends ChangeNotifier {
           return true;
         } catch (_) {
           if (DateTime.now().isAfter(deadline)) {
-            throw TimeoutException('服务器启动超时');
+            // Windows lets the dual-stack listener bind next to another
+            // program's IPv4 socket, so the clash shows up as no answer from
+            // our own server rather than an early exit.
+            error = '端口 $port 上没有本机服务器响应，可能已被其他程序占用';
+            throw TimeoutException(error);
           }
           await Future<void>.delayed(const Duration(milliseconds: 200));
         } finally {
