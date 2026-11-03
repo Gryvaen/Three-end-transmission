@@ -80,11 +80,15 @@ class LanClient {
     await json('POST', '/api/auth', body: {'pin': pin});
   }
 
-  Future<WebSocket> connect(String name, String key) async {
+  Future<WebSocket> connect(
+    String name,
+    String key, [
+    String platform = 'android',
+  ]) async {
     final uri = base.replace(
       scheme: base.scheme == 'https' ? 'wss' : 'ws',
       path: '/ws',
-      queryParameters: {'name': name, 'key': key, 'platform': 'android'},
+      queryParameters: {'name': name, 'key': key, 'platform': platform},
     );
     final ws = await WebSocket.connect(
       uri.toString(),

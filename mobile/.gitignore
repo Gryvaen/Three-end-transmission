@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Go server bundled into desktop builds (built by CI or by hand)
+/windows/lanroom/
+/linux/lanroom/

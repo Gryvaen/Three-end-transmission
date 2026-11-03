@@ -1,6 +1,6 @@
-# LanRoom Android
+# LanRoom 客户端（Android / Windows）
 
-Flutter 原生客户端，与仓库内 Go 服务端和网页互通。支持前台自动发现、口令登录、设备列表、群聊/私信、文件上传续传和下载保存。
+Flutter 原生客户端，与仓库内 Go 服务端和网页互通。支持前台自动发现、口令登录、设备列表、群聊/私信、文件上传续传和下载保存。同一个工程同时构建 Android App 和 Windows 桌面 App；Windows 版另外内置服务端，见 [Windows 桌面版](#windows-桌面版)。目录名 `mobile/` 和包名 `lanroom_mobile` 为历史沿用。
 
 ## 普通用户：安装与使用
 
@@ -65,6 +65,56 @@ flutter build apk --debug
 
 断线后先直接重连上次的服务器地址（退避 2s→30s），只有直连失败且应用在前台时才回退到 UDP 搜索；回到前台时若 WebSocket 仍在线，不发任何请求。
 
+## Windows 桌面版
+
+### 下载与运行
+
+GitHub Actions 的 `desktop` 工作流（`.github/workflows/desktop.yml`）在 `windows-latest` 上构建，产物为 `LanRoom-windows-x64.zip`；推送 `v*` 标签时会附加到 Release。解压后保持目录结构不变，运行 `LanRoom.exe`。zip 内包含：
+
+- `LanRoom.exe`：桌面 App；
+- `lanroom-server.exe`：内置的 Go 服务端（不会弹出控制台窗口）；
+- `data/`、`*.dll`：Flutter 运行时与插件。
+
+未做代码签名，首次运行时 SmartScreen 可能提示，选择「仍要运行」。
+
+### 本机作为服务器
+
+窗口宽度 ≥ 900 时是双栏布局：左侧为连接状态、「本机作为服务器」面板和在线设备，右侧为消息。
+
+- 打开开关后，App 用 `%LOCALAPPDATA%\LanRoom\server` 作为 `LANROOM_DATA_DIR` 启动 `lanroom-server.exe`。服务 UUID 固定在该目录，手机记住的服务器不会因重启而改变。启动完成后 App 自动连接 `127.0.0.1`，面板显示加入地址和二维码。
+- 「设置」可改 HTTP 端口（默认 `8787`）、房间口令、打开 App 时自动启动。修改需要先关闭服务器。
+- 首次启动时 Windows 防火墙会询问 `lanroom-server.exe`，请允许「专用网络」。拒绝后其他设备无法连入，需要到「Windows Defender 防火墙 → 允许应用」里补开 TCP 8787 / UDP 8788。
+- 端口被占用（例如已经在运行 `go run .` 或旧版服务）时启动失败，面板显示最后几行日志。App 会核对服务 UUID，不会把占用端口的其他服务当成自己。
+- 关闭窗口会停止服务器。App 崩溃或被任务管理器结束时，服务端检测到 stdin 关闭后也会自行退出（`LANROOM_EXIT_ON_STDIN_EOF=1`）。
+
+### 与 Android 版的差异
+
+| 项目 | Windows |
+|---|---|
+| 凭据存储 | `%LOCALAPPDATA%\LanRoom\secrets.json`，每个值用 DPAPI（当前用户）加密 |
+| 设备名 | 默认取计算机名 `COMPUTERNAME` |
+| 发现 | `GetAdaptersAddresses` 枚举已启用的以太网 / Wi-Fi 网卡，按真实前缀计算广播地址，跳过 TUN 等虚拟网卡 |
+| 发送文件 | 「发送文件」或把文件拖进窗口。直接读取原文件，不复制、不删除；上传途中修改文件会导致续传报错 |
+| 保存文件 | 下载后弹出「另存为」 |
+| 后台 | 最小化、失去焦点都保持在线；传输期间阻止系统睡眠 |
+| 网络变化 | 每 5 秒检查网卡地址，变化后探测并重连 |
+| 输入 | Enter 发送，Shift+Enter 换行 |
+
+### 自行构建
+
+需要 Windows 10/11、Visual Studio 2022（「使用 C++ 的桌面开发」工作负载）、Flutter 3.47 和 Go 1.26.2+。在仓库根目录：
+
+```powershell
+go build -trimpath -ldflags "-s -w -H windowsgui" -o mobile/windows/lanroom/lanroom-server.exe .
+cd mobile
+flutter pub get
+flutter build windows --release
+```
+
+产物位于 `build\windows\x64\runner\Release\`。没有 `lanroom-server.exe` 时同样能构建，此时 App 只作为客户端使用，界面不显示服务器面板。
+
+Flutter 的 Windows 版不能在 Linux 上交叉编译。在 Linux 上调试桌面布局可以用 `flutter run -d linux`：先执行 `go build -o mobile/linux/lanroom/lanroom-server .`，构建时会把它装进 bundle。Linux 版只用于开发调试，凭据不加密。
+
 ## 测试
 
 ```sh
@@ -74,6 +124,8 @@ flutter analyze
 flutter test
 flutter test integration_test/lan_test.dart -d <Android设备ID>
 ```
+
+`test/local_server_test.dart` 会从仓库根目录 `go build` 一份服务端，验证启动、自连、上传不删原文件、端口冲突和 stdin 关闭退出。没有 Go 工具链时这些用例会跳过。`test/desktop_bridge_test.dart` 中的 DPAPI 和网卡枚举只在 Windows 上运行，CI 的 Windows job 会执行。
 
 真机集成测试要求：独立测试服务使用 HTTP `18787`、UDP `8788`、口令 `mobile-test-2026`。不要把测试服务口令用于日常服务。电脑运行：
 

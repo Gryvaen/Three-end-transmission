@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lanroom_mobile/desktop_bridge.dart';
+import 'package:lanroom_mobile/local_server.dart';
 import 'package:lanroom_mobile/main.dart';
 import 'package:lanroom_mobile/room.dart';
 import 'package:lanroom_mobile/discovery.dart';
+import 'package:lanroom_mobile/platform.dart';
 
 void main() {
   test('发现回复必须匹配请求、版本及服务标识', () {
@@ -43,7 +47,7 @@ void main() {
     expect(preferredServer([moved], null), same(moved));
   });
   testWidgets('未连接时展示发现状态，禁止发送', (tester) async {
-    final room = Room()..status = '未发现服务';
+    final room = Room(bridge: AndroidBridge())..status = '未发现服务';
     await tester.pumpWidget(LanRoomApp(room: room));
     expect(find.text('未发现服务'), findsOneWidget);
     expect(find.text('手动输入地址'), findsOneWidget);
@@ -55,7 +59,7 @@ void main() {
     room.dispose();
   });
   testWidgets('在线设备可切换私信目标并显示文件', (tester) async {
-    final room = Room()
+    final room = Room(bridge: AndroidBridge())
       ..connected = true
       ..ownID = 'self'
       ..devices = [
@@ -82,5 +86,33 @@ void main() {
     expect(find.text('example.txt'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     room.dispose();
+  });
+  testWidgets('桌面宽窗口显示设备侧栏和本机服务器面板', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final temp = Directory.systemTemp.createTempSync('lanroom-widget-');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final bridge = DesktopBridge(root: temp.path);
+    final server = LocalServer(bridge, executable: null);
+    final room = Room(bridge: bridge)
+      ..connected = true
+      ..ownID = 'self'
+      ..devices = [
+        {'id': 'self', 'name': '书房电脑', 'platform': 'windows'},
+        {'id': 'peer', 'name': '手机', 'platform': 'android'},
+      ];
+    await tester.pumpWidget(LanRoomApp(room: room, server: server));
+    await tester.pumpAndSettle();
+    expect(find.text('本机作为服务器'), findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNothing);
+    await tester.tap(find.text('手机'));
+    await tester.pump();
+    expect(room.recipients, ['peer']);
+    expect(find.text('私信 · 手机'), findsOneWidget);
+    expect(find.text('发送私信（Enter 发送，Shift+Enter 换行）'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    room.dispose();
+    server.dispose();
   });
 }

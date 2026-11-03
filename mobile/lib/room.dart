@@ -10,11 +10,13 @@ import 'discovery.dart';
 import 'platform.dart';
 
 class Room extends ChangeNotifier {
-  final AndroidBridge bridge;
-  Room({AndroidBridge? bridge}) : bridge = bridge ?? AndroidBridge();
+  final NativeBridge bridge;
+  Room({NativeBridge? bridge}) : bridge = bridge ?? NativeBridge.create() {
+    nickname = this.bridge.platform == 'android' ? '我的手机' : '我的电脑';
+  }
   String status = '正在准备连接';
   String? error;
-  String nickname = '我的手机';
+  late String nickname;
   String key = '';
   String? preferred;
   FoundServer? selected;
@@ -207,9 +209,7 @@ class Room extends ChangeNotifier {
     client?.close();
     client = null;
     try {
-      final allowed =
-          await AndroidBridge.channel.invokeMethod<bool>('permission') ?? false;
-      if (!allowed) {
+      if (!await bridge.permission()) {
         throw StateError('请在系统设置中允许本地网络访问');
       }
       final found = await discover(await bridge.interfaces);
@@ -389,7 +389,7 @@ class Room extends ChangeNotifier {
   Future<void> _open(int token) async {
     await _socket?.cancel();
     await client?.socket?.close();
-    final ws = await client!.connect(nickname, key);
+    final ws = await client!.connect(nickname, key, bridge.platform);
     if (_disposed || token != _generation) {
       await ws.close();
       return;
@@ -504,19 +504,47 @@ class Room extends ChangeNotifier {
       if (file == null) {
         return;
       }
-      pendingUpload = {
-        ...file,
-        'serviceId': targetServer,
-        'to': targetRecipients,
-      };
-      await _saveUpload();
-      changed();
-      await resumeUpload();
+      await _start(file, targetServer, targetRecipients);
     } catch (e) {
       fail('选择文件失败：$e');
     } finally {
       picking = false;
       changed();
+    }
+  }
+
+  // Desktop drag and drop: the file stays where it is (`owned: false`).
+  Future<void> sendFile(Map<String, dynamic> file) async {
+    if (!connected) {
+      fail('请先连接服务器');
+      return;
+    }
+    if (pendingUpload != null || picking) {
+      fail('请等待当前上传完成或取消');
+      return;
+    }
+    try {
+      await _start(file, selected!.id, List<String>.from(recipients));
+    } catch (e) {
+      fail('发送文件失败：$e');
+    }
+  }
+
+  Future<void> _start(
+    Map<String, dynamic> file,
+    String serviceId,
+    List<String> to,
+  ) async {
+    pendingUpload = {...file, 'serviceId': serviceId, 'to': to};
+    await _saveUpload();
+    changed();
+    await resumeUpload();
+  }
+
+  // Only app-private staged copies are ours to delete, never a user's file.
+  Future<void> _discard(Map<String, dynamic> job) async {
+    if (job['owned'] != false) {
+      await File(job['path'] as String).delete();
     }
   }
 
@@ -625,7 +653,7 @@ class Room extends ChangeNotifier {
       await _saveUpload();
       await source.close();
       source = null;
-      await File(job['path'] as String).delete();
+      await _discard(job);
       transferStatus = '上传完成';
       progress = 1;
     } catch (e) {
@@ -685,7 +713,7 @@ class Room extends ChangeNotifier {
       }
     }
     try {
-      await File(job['path'] as String).delete();
+      await _discard(job);
     } catch (_) {}
     transferStatus = '已取消上传';
     changed();
@@ -739,7 +767,10 @@ class Room extends ChangeNotifier {
       if (export) {
         final saved = await bridge.save(path, name);
         transferStatus = saved ? '已保存 $name' : '已取消保存';
-        await file.delete();
+        // Desktop save may move the file instead of copying it.
+        if (await file.exists()) {
+          await file.delete();
+        }
         changed();
         return null;
       }
