@@ -43,9 +43,9 @@ With Docker on Linux:
 docker compose -f docker-compose.host.yml up -d --build
 ```
 
-## Android app
+## Android and Windows apps
 
-An optional Flutter Android app supports LAN discovery, PIN login, chat and file transfers. A computer must run the Go server. See the [Android guide](mobile/README.md) and [usage guide](docs/usage.md) (Chinese). This repository does not provide a guaranteed prebuilt APK download; build instructions are included.
+An optional Flutter app for Android supports LAN discovery, PIN login, chat and file transfers; a computer must run the Go server. The same app builds for Windows with a two-pane layout, drag-and-drop uploads and a built-in server: switch on "本机作为服务器" (host on this PC) and phones discover it without running `go run`. CI (`.github/workflows/desktop.yml`) builds `LanRoom-windows-x64.zip`. See the [client guide](mobile/README.md) and [usage guide](docs/usage.md) (Chinese). This repository does not provide a guaranteed prebuilt APK download; build instructions are included.
 
 ## Deployment
 

@@ -1,12 +1,12 @@
 # LanRoom
 
-**在手机与电脑之间发送文字、图片和文件，支持网页和 Android App。**
+**在手机与电脑之间发送文字、图片和文件，支持网页、Android App 和 Windows App。**
 
 简体中文 | [English](README.en.md)
 
-LanRoom 由 Go 服务端、内嵌网页和可选的 Flutter Android 客户端组成。一台电脑运行服务端，其他设备打开网页或使用 App 加入同一个房间，由服务端中转消息和文件。
+LanRoom 由 Go 服务端、内嵌网页和可选的 Flutter 客户端（Android、Windows）组成。一台电脑运行服务端，其他设备打开网页或使用 App 加入同一个房间，由服务端中转消息和文件。
 
-网页适用于 Android、iOS、Windows、macOS 和 Linux 浏览器，无需安装客户端。原生 App 首版面向 Android，不支持手机充当服务端，也不提供跨公网自动发现。
+网页适用于 Android、iOS、Windows、macOS 和 Linux 浏览器，无需安装客户端。Android App 不支持手机充当服务端；Windows App 内置服务端，可以一键让这台电脑当服务器。两者都不提供跨公网自动发现。
 
 ## 功能
 
@@ -14,6 +14,7 @@ LanRoom 由 Go 服务端、内嵌网页和可选的 Flutter Android 客户端组
 - 文字、图片、文件互传，分片上传、进度和取消；中断后可以继续上传。
 - 网页支持粘贴图片、拖入文件和文件夹；文件夹打包为 ZIP 上传。
 - Android 使用局域网 UDP 广播自动发现服务，记忆服务 UUID，IP 改变后重新寻找。
+- Windows App 与 Android 共用同一套客户端，宽窗口双栏布局，支持拖入文件、Enter 发送，内置「本机作为服务器」。
 - 网页二维码加入、可选房间口令、断线重连。
 - 支持局域网、Nginx HTTPS 和 Tailscale 部署。
 
@@ -54,6 +55,10 @@ docker compose -f docker-compose.host.yml logs --tail 50
 
 打开 App：首次发现一个服务时自动连接，多个时选择；需要口令时输入口令。看到设备列表后，先与电脑网页互发一条文字，再尝试小文件。没找到服务时进入「连接排查」，也可用「手动连接」验证 HTTP 是否可达。
 
+### 使用 Windows App
+
+Windows 用户可以不装 Go：从 GitHub Actions 的 `desktop` 工作流（或 Release）下载 `LanRoom-windows-x64.zip`，解压后运行 `LanRoom.exe`，打开左侧「本机作为服务器」。首次启动时 Windows 防火墙会弹窗，请允许「专用网络」。手机 App 会自动发现这台电脑，其他设备扫描面板里的二维码即可加入。也可以不开启服务器，只把它当作客户端连接别处的 LanRoom。详见 [客户端指南](mobile/README.md#windows-桌面版)。
+
 ## 开始使用
 
 1. 两台设备加入同一个服务，设置易识别的昵称，确认双方出现在在线设备列表。
@@ -74,7 +79,7 @@ Android 主要面向前台使用，不保证锁屏后持续在线。UDP 广播�
 - [使用手册](docs/usage.md)：首次连接、群聊私信、文件收发、恢复连接。
 - [部署指南](docs/deployment.md)：直接运行、Docker、更新维护、Nginx、Tailscale。
 - [配置参考](docs/configuration.md)：环境变量、端口、服务 UUID、限制。
-- [Android 指南](mobile/README.md)：构建安装、真机运行、客户端行为。
+- [客户端指南](mobile/README.md)：Android / Windows 构建安装、真机运行、客户端行为。
 - [排错指南](docs/troubleshooting.md)：发现失败、Mihomo、构建和传输问题。
 - [API 文档](docs/api.md)：HTTP、WebSocket 和 UDP 发现协议。
 - [历史测试记录](mobile/TEST_RESULTS.md)：已通过及受环境限制未验证的项目，不代表所有网络环境均已通过。

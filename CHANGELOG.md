@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Windows desktop app, built from the same Flutter project as the Android app (`mobile/`). Two-pane layout on wide windows, drag-and-drop uploads, Enter to send, DPAPI-encrypted credentials, and uploads that read the original file without copying it.
+- Built-in server in the Windows app: "本机作为服务器" starts a bundled `lanroom-server.exe`, connects to it, and shows the join URLs and QR code. Port, PIN and auto-start are configurable.
+- `LANROOM_EXIT_ON_STDIN_EOF=1` makes the server exit when stdin closes, so a crashed or killed desktop app does not leave it holding the port.
+- GitHub Actions workflow `desktop` runs Go and Flutter tests on Linux and Windows and packages `LanRoom-windows-x64.zip`.
 - Public server mode. `LANROOM_PUBLIC_URL` makes the join URL and QR code use a public address, and the server refuses to start without `LANROOM_PIN`.
 - `LANROOM_LISTEN` and the `-addr` flag set the listen address, for example `127.0.0.1:8787` behind a reverse proxy.
 - `LANROOM_TRUSTED_PROXIES`: `X-Forwarded-*` headers are honoured only from the listed proxies.
