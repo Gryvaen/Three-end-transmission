@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"flag"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -137,7 +138,20 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	if os.Getenv("LANROOM_EXIT_ON_STDIN_EOF") == "1" {
+		go watchStdin(os.Stdin, stop)
+	}
 	<-stop
 
 	_ = httpServer.Close()
+}
+
+// watchStdin 在 stdin 关闭后请求退出。桌面 App 以管道拉起服务端，
+// App 崩溃或被结束时管道随之关闭，服务端不会残留并占用端口。
+func watchStdin(r io.Reader, stop chan<- os.Signal) {
+	_, _ = io.Copy(io.Discard, r)
+	select {
+	case stop <- syscall.SIGTERM:
+	default:
+	}
 }

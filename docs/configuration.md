@@ -24,6 +24,7 @@
 | `LANROOM_DATA_DIR` | 服务 UUID 目录，应独立持久化 | `<用户配置目录>/lanroom` |
 | `LANROOM_DISCOVERY` | 精确设为 `false` 关闭 UDP 发现；公网模式不开启 | 局域网开启 |
 | `LANROOM_DISCOVERY_PORT` | 发现 UDP 端口，范围 `1..65535` | `8788` |
+| `LANROOM_EXIT_ON_STDIN_EOF` | 精确设为 `1` 时，stdin 关闭即退出。供 Windows App 内置服务器使用：App 崩溃或被结束后服务端不会残留占用端口 | 关闭 |
 | `LANROOM_PORT` | 仅 `docker-compose.yml`：宿主机端口 | `8787` |
 
 ## 限制
